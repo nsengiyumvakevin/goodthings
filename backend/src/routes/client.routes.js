@@ -12,11 +12,32 @@ const authenticate = require("../middleware/authenticate");
 const asyncRoute = require("../utils/asyncRoute");
 const {
   applyPaymentResult,
+  expirePendingBills,
   requestMobileMoney,
 } = require("../services/payment.service");
+const { sendEmail, updateJob } = require("../services/email.service");
 
 const router = express.Router();
 router.use(authenticate(["client"]));
+
+async function createBillId() {
+  const date = new Date().toISOString().slice(0, 10).replaceAll("-", "");
+  let billId;
+  do {
+    billId = `TXN-${date}-${String(Math.floor(Math.random() * 10000)).padStart(4, "0")}`;
+  } while (await Payment.exists({ bill_id: billId }));
+  return billId;
+}
+
+function emailBill(client, payment) {
+  sendEmail({
+    to: client.email,
+    subject: `Your Goodthings bill ${payment.bill_id}`,
+    text: `Hello ${client.first_name}, your bill ${payment.bill_id} for RWF ${payment.amount.toLocaleString()} is ready. It expires ${payment.expires_at.toLocaleString()}. Sign in to view and pay it.`,
+  })
+    .then(() => updateJob("bill_email", "ok"))
+    .catch((error) => updateJob("bill_email", "failed", error.message));
+}
 
 router.get(
   "/me",
@@ -131,6 +152,8 @@ router.post(
       0,
     );
     const reference = crypto.randomUUID();
+    const billId = await createBillId();
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
     const dueDate =
       method === "debt"
         ? new Date(Date.now() + periodDays * 86400000)
@@ -141,6 +164,8 @@ router.post(
       method,
       status: "pending",
       reference,
+      bill_id: billId,
+      expires_at: expiresAt,
       due_date: dueDate,
     });
     const reservedItems = [];
@@ -183,34 +208,22 @@ router.post(
         status: "pending",
         review_status: "pending",
       });
-      return res
-        .status(201)
-        .json({ payment, message: "Purchase recorded as debt." });
-    }
-    if (method === "cash")
-      return res
-        .status(201)
-        .json({
-          payment,
-          message: "Order placed. Cash payment is awaiting confirmation.",
-        });
-
-    try {
-      const momo = await requestMobileMoney(
+      const client = await Client.findById(req.auth.sub);
+      if (client) emailBill(client, payment);
+      return res.status(201).json({
         payment,
-        req.body.mobile_money_number,
-      );
-      res
-        .status(201)
-        .json({
-          payment,
-          momo,
-          message: "Approve the payment request on your phone.",
-        });
-    } catch (error) {
-      await applyPaymentResult(payment, false);
-      throw error;
+        message: `Debt bill ${billId} created. It expires in 24 hours and awaits admin review.`,
+      });
     }
+    const client = await Client.findById(req.auth.sub);
+    if (client) emailBill(client, payment);
+    res.status(201).json({
+      payment,
+      message:
+        method === "cash"
+          ? `Cash bill ${billId} created. Pay when collecting; it expires in 24 hours.`
+          : `Bill ${billId} created. Pay it any time within 24 hours.`,
+    });
   }),
 );
 
@@ -232,6 +245,60 @@ router.get(
         ),
       })),
     );
+  }),
+);
+
+router.get(
+  "/bills/:billId",
+  asyncRoute(async (req, res) => {
+    const payment = await Payment.findOne({
+      client_id: req.auth.sub,
+      bill_id: req.params.billId.trim().toUpperCase(),
+    })
+      .populate("client_id", "first_name last_name email")
+      .lean();
+    if (!payment) return res.status(404).json({ error: "Bill not found." });
+    res.json(payment);
+  }),
+);
+
+router.post(
+  "/bills/:billId/pay",
+  asyncRoute(async (req, res) => {
+    const billId = req.params.billId.trim().toUpperCase();
+    const payment = await Payment.findOne({
+      client_id: req.auth.sub,
+      bill_id: billId,
+    });
+    if (!payment) return res.status(404).json({ error: "Bill not found." });
+    if (payment.status !== "pending")
+      return res.status(409).json({ error: `This bill is ${payment.status}.` });
+    if (!payment.expires_at || payment.expires_at <= new Date()) {
+      await expirePendingBills();
+      return res.status(410).json({ error: "This bill has expired." });
+    }
+    if (payment.method !== "mobile_money")
+      return res.status(409).json({ error: "This bill is not payable by mobile money." });
+    if (payment.momo_requested_at)
+      return res.status(409).json({ error: "Payment request already sent. Check your phone." });
+
+    const mobileNumber = String(req.body.mobile_money_number || "").trim();
+    payment.momo_requested_at = new Date();
+    await payment.save();
+    try {
+      const momo = await requestMobileMoney(payment, mobileNumber);
+      res.json({
+        payment,
+        momo,
+        message: `Approve bill ${payment.bill_id} on your phone.`,
+      });
+    } catch (error) {
+      await Payment.updateOne(
+        { _id: payment._id, status: "pending" },
+        { $unset: { momo_requested_at: 1 } },
+      );
+      throw error;
+    }
   }),
 );
 
@@ -260,6 +327,17 @@ router.post(
         .status(404)
         .json({ error: "An outstanding debt was not found." });
 
+    const existingBill = await Payment.findOne({
+      debt_id: debt._id,
+      status: "pending",
+      expires_at: { $gt: new Date() },
+    });
+    if (existingBill)
+      return res.status(409).json({
+        payment: existingBill,
+        message: `Bill ${existingBill.bill_id} is already waiting for payment.`,
+      });
+
     const payment = await Payment.create({
       client_id: req.auth.sub,
       debt_id: debt._id,
@@ -267,21 +345,15 @@ router.post(
       method: "mobile_money",
       status: "pending",
       reference: crypto.randomUUID(),
+      bill_id: await createBillId(),
+      expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000),
     });
-    try {
-      const momo = await requestMobileMoney(
-        payment,
-        req.body.mobile_money_number,
-      );
-      res.status(201).json({
-        payment,
-        momo,
-        message: "Approve the debt payment request on your phone.",
-      });
-    } catch (error) {
-      await Payment.deleteOne({ _id: payment._id });
-      throw error;
-    }
+    const client = await Client.findById(req.auth.sub);
+    if (client) emailBill(client, payment);
+    res.status(201).json({
+      payment,
+      message: `Debt bill ${payment.bill_id} created. Enter your phone and pay from My purchases.`,
+    });
   }),
 );
 

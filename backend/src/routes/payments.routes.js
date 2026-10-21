@@ -20,9 +20,11 @@ router.post(
       return res
         .status(400)
         .json({ error: "Callback is missing a payment reference." });
-    const payment = await Payment.findOne({ reference });
+    const payment = await Payment.findOne({
+      $or: [{ bill_id: reference }, { reference }],
+    });
     if (!payment) return res.sendStatus(204);
-    const status = await verifyMobileMoneyPayment(reference);
+    const status = await verifyMobileMoneyPayment(payment.reference);
     if (["SUCCESSFUL", "SUCCESS", "PAID"].includes(status))
       await applyPaymentResult(payment, true);
     else if (["FAILED", "REJECTED", "EXPIRED", "TIMEOUT"].includes(status))

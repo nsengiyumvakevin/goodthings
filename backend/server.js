@@ -5,6 +5,7 @@ const mongoose = require("mongoose");
 const app = require("./src/app");
 const { Admin, JobMonitoring } = require("./models");
 const { seedProducts } = require("./src/database/seed");
+const { startBillExpiryJob } = require("./src/services/bill-expiry.service");
 
 async function start() {
   if (process.env.NODE_ENV === "production" && !process.env.JWT_SECRET) {
@@ -43,6 +44,17 @@ async function start() {
     },
     { upsert: true },
   );
+  await JobMonitoring.updateOne(
+    { job_name: "bill_expiration" },
+    {
+      $setOnInsert: {
+        status: "waiting",
+        error: "Bill expiry worker is starting.",
+      },
+    },
+    { upsert: true },
+  );
+  startBillExpiryJob();
 
   const port = Number(process.env.PORT || 3000);
   return app.listen(port, () =>

@@ -1,9 +1,114 @@
-const { CartItem, Client, Debt, Payment, Product } = require("../../models");
+const {
+  Admin,
+  CartItem,
+  Client,
+  Debt,
+  Income,
+  Notification,
+  Payment,
+  Product,
+} = require("../../models");
 const { sendEmail, updateJob } = require("./email.service");
 
+async function expireBill(payment, now = new Date()) {
+  const expiredStatus =
+    payment.method === "debt" && payment.status === "unpaid"
+      ? "overdue"
+      : "expired";
+  const expired = await Payment.findOneAndUpdate(
+    {
+      _id: payment._id,
+      status: { $in: ["pending", "unpaid"] },
+      expires_at: { $lte: now },
+    },
+    { status: expiredStatus },
+    { new: true },
+  );
+  if (!expired) return false;
+
+  if (payment.method === "debt") {
+    await Debt.updateOne(
+      { payment_id: payment._id, status: "pending" },
+      { status: "expired", review_status: "expired" },
+    );
+    await Debt.updateOne(
+      {
+        payment_id: payment._id,
+        status: { $in: ["unpaid", "partial"] },
+      },
+      { status: "overdue" },
+    );
+  }
+  const items = await CartItem.find({ payment_id: payment._id, status: "pending" });
+  for (const item of items) {
+    await Product.updateOne(
+      { _id: item.product_id },
+      { $inc: { stock_quantity: item.quantity } },
+    );
+  }
+  await CartItem.updateMany(
+    { payment_id: payment._id, status: "pending" },
+    { status: "in_cart", payment_id: null },
+  );
+  return true;
+}
+
+async function expirePendingBills(now = new Date()) {
+  const dueBills = await Payment.find({
+    status: { $in: ["pending", "unpaid"] },
+    expires_at: { $lte: now },
+  }).select("_id");
+  let expiredCount = 0;
+  for (const payment of dueBills) {
+    if (await expireBill(payment, now)) expiredCount += 1;
+  }
+  return expiredCount;
+}
+
+async function recordPaidBill(payment, client) {
+  const admin = await Admin.findOne().sort({ created_at: 1 });
+  if (!admin) return;
+  await Income.updateOne(
+    { payment_id: payment._id },
+    {
+      $setOnInsert: {
+        payment_id: payment._id,
+        amount: payment.amount,
+        description: `Bill ${payment.bill_id || payment.reference} paid`,
+        recorded_by: admin._id,
+      },
+    },
+    { upsert: true },
+  );
+  await Notification.updateOne(
+    { admin_id: admin._id, payment_id: payment._id },
+    {
+      $setOnInsert: {
+        admin_id: admin._id,
+        payment_id: payment._id,
+        client_id: client._id,
+        message: `${client.first_name} ${client.last_name} paid bill ${payment.bill_id || payment.reference} (RWF ${payment.amount.toLocaleString()}).`,
+      },
+    },
+    { upsert: true },
+  );
+}
+
 async function applyPaymentResult(payment, successful) {
+  if (payment.expires_at && payment.expires_at <= new Date()) {
+    await expireBill(payment);
+    return;
+  }
   const updated = await Payment.findOneAndUpdate(
-    { _id: payment._id, status: "pending" },
+    {
+      _id: payment._id,
+      status: "pending",
+      $or: [
+        { expires_at: { $exists: false } },
+        { expires_at: null },
+        { expires_at: { $gt: new Date() } },
+      ],
+    },
     successful ? { status: "paid", paid_at: new Date() } : { status: "failed" },
     { new: true },
   );
@@ -22,6 +127,19 @@ async function applyPaymentResult(payment, successful) {
     debt.status = debt.balance === 0 ? "settled" : "partial";
     if (debt.balance === 0) debt.settled_at = new Date();
     await debt.save();
+    const client = await Client.findById(payment.client_id);
+    if (client) {
+      await recordPaidBill(updated, client);
+      sendEmail({
+        to: client.email,
+        subject: `Debt payment confirmed: ${payment.bill_id || payment.reference}`,
+        text: `Hello ${client.first_name}, your debt payment of RWF ${payment.amount.toLocaleString()} was confirmed. Bill: ${payment.bill_id || payment.reference}. Remaining balance: RWF ${debt.balance.toLocaleString()}.`,
+      })
+        .then(() => updateJob("purchase_confirmation_email", "ok"))
+        .catch((error) =>
+          updateJob("purchase_confirmation_email", "failed", error.message),
+        );
+    }
     return;
   }
 
@@ -46,13 +164,14 @@ async function applyPaymentResult(payment, successful) {
   }).populate("product_id");
   const client = await Client.findById(payment.client_id);
   if (!client) return;
+  await recordPaidBill(updated, client);
   const summary = purchasedItems
     .map((item) => `${item.product_id?.name || "Product"} x ${item.quantity}`)
     .join(", ");
   sendEmail({
     to: client.email,
     subject: "Your purchase is confirmed",
-    text: `Hello ${client.first_name}, your payment of RWF ${payment.amount.toLocaleString()} was successful. Purchased: ${summary}. Reference: ${payment.reference}.`,
+    text: `Hello ${client.first_name}, your payment of RWF ${payment.amount.toLocaleString()} was successful. Purchased: ${summary}. Bill: ${payment.bill_id || payment.reference}.`,
   })
     .then(() => updateJob("purchase_confirmation_email", "ok"))
     .catch((error) =>
@@ -129,10 +248,10 @@ async function requestMobileMoney(payment, phoneNumber) {
     body: JSON.stringify({
       amount: String(Math.round(payment.amount)),
       currency: process.env.MOMO_CURRENCY || "RWF",
-      externalId: payment.reference,
+      externalId: payment.bill_id || payment.reference,
       payer: { partyIdType: "MSISDN", partyId: phone },
       payerMessage: "Purchase payment",
-      payeeNote: `Order ${payment.reference}`,
+      payeeNote: `Bill ${payment.bill_id || payment.reference}`,
     }),
   });
   if (response.status !== 202) {
@@ -168,6 +287,7 @@ async function verifyMobileMoneyPayment(reference) {
 
 module.exports = {
   applyPaymentResult,
+  expirePendingBills,
   requestMobileMoney,
   verifyMobileMoneyPayment,
 };

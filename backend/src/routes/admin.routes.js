@@ -4,6 +4,7 @@ const {
   Debt,
   Income,
   JobMonitoring,
+  Notification,
   Outcome,
   Payment,
   SalesReturn,
@@ -78,6 +79,34 @@ router.get(
         .sort({ created_at: -1 })
         .lean(),
     );
+  }),
+);
+
+router.get(
+  "/notifications",
+  asyncRoute(async (req, res) => {
+    res.json(
+      await Notification.find({ admin_id: req.auth.sub })
+        .populate("client_id", "first_name last_name email")
+        .populate("payment_id", "bill_id amount status")
+        .sort({ createdAt: -1 })
+        .limit(50)
+        .lean(),
+    );
+  }),
+);
+
+router.patch(
+  "/notifications/:id/read",
+  asyncRoute(async (req, res) => {
+    const notification = await Notification.findOneAndUpdate(
+      { _id: req.params.id, admin_id: req.auth.sub },
+      { read_at: new Date() },
+      { new: true },
+    );
+    if (!notification)
+      return res.status(404).json({ error: "Notification not found." });
+    res.json(notification);
   }),
 );
 

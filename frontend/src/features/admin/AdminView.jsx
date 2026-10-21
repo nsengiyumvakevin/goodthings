@@ -27,6 +27,13 @@ import {
   Wallet,
 } from "lucide-react";
 
+const primaryButton =
+  "inline-flex min-h-10 items-center justify-center gap-2 rounded bg-emerald-800 px-4 text-sm font-semibold text-white hover:bg-emerald-900";
+const softButton =
+  "inline-flex min-h-9 items-center justify-center gap-2 rounded border border-stone-200 bg-white px-3 text-sm font-medium text-stone-700 hover:bg-stone-50";
+const textButton =
+  "inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-800 hover:underline";
+
 export function AdminView({
   page,
   payments,
@@ -57,13 +64,13 @@ export function AdminView({
     .reduce((total, payment) => total + payment.amount, 0);
   if (page === "Payments")
     return (
-      <section className="content-section">
+      <section className="space-y-5">
         <SectionHead
           title="Payments"
           subtitle="Every sale, transfer and payment promise."
           action={
             <button
-              className="button button-soft"
+              className={softButton}
               onClick={() =>
                 setFilter(filter === "All activity" ? "Paid" : "All activity")
               }
@@ -72,14 +79,14 @@ export function AdminView({
             </button>
           }
         />
-        <div className="table-shell">
+        <div className="overflow-hidden rounded-md border border-stone-200 bg-white">
           <PaymentsTable payments={payments} confirmCash={confirmCash} />
         </div>
       </section>
     );
   if (page === "Debts")
     return (
-      <section className="content-section">
+      <section className="space-y-5">
         <SectionHead
           title="Outstanding balances"
           subtitle="Keep every promise and due date in view."
@@ -94,23 +101,22 @@ export function AdminView({
     );
   if (page === "Income & outcome")
     return (
-      <section className="content-section">
+      <section className="space-y-5">
         <SectionHead
           title="Income & outcome"
           subtitle="A simple record of what comes in and what goes out."
           action={
             <button
-              className="button button-primary"
+              className={primaryButton}
               onClick={() => setActiveModal("record")}
             >
               <Plus size={16} /> Add record
             </button>
           }
         />
-        <div className="ledger-summary">
-          <div>
-            <span>Total income</span>
-            <b>
+        <div className="grid gap-2 sm:grid-cols-3">
+          <div className="flex items-center justify-between rounded-md border border-stone-200 bg-white p-4">
+            <span className="text-sm text-stone-600">Total income</span><b className="font-semibold text-stone-900">
               {money(
                 ledger
                   .filter((entry) => entry.type === "Income")
@@ -118,9 +124,8 @@ export function AdminView({
               )}
             </b>
           </div>
-          <div>
-            <span>Total outcome</span>
-            <b>
+          <div className="flex items-center justify-between rounded-md border border-stone-200 bg-white p-4">
+            <span className="text-sm text-stone-600">Total outcome</span><b className="font-semibold text-stone-900">
               {money(
                 ledger
                   .filter((entry) => entry.type === "Outcome")
@@ -128,9 +133,8 @@ export function AdminView({
               )}
             </b>
           </div>
-          <div>
-            <span>Net position</span>
-            <b>
+          <div className="flex items-center justify-between rounded-md border border-stone-200 bg-white p-4">
+            <span className="text-sm text-stone-600">Net position</span><b className="font-semibold text-stone-900">
               {money(
                 ledger.reduce(
                   (sum, item) =>
@@ -146,7 +150,7 @@ export function AdminView({
     );
   if (page === "Sales returns")
     return (
-      <section className="content-section">
+      <section className="space-y-5">
         <SectionHead
           title="Sales returns"
           subtitle="Review requests and decide what happens next."
@@ -156,13 +160,13 @@ export function AdminView({
     );
   if (page === "Products")
     return (
-      <section className="content-section">
+      <section className="space-y-5">
         <SectionHead
           title="Product catalogue"
           subtitle="Your best-loved things, ready for the next order."
           action={
             <button
-              className="button button-primary"
+              className={primaryButton}
               onClick={() => setActiveModal("product")}
             >
               <Plus size={16} /> Add product
@@ -174,13 +178,13 @@ export function AdminView({
     );
   if (page === "Reports")
     return (
-      <section className="content-section">
+      <section className="space-y-5">
         <SectionHead
           title="Activity reports"
           subtitle="Choose a time period and export a shareable snapshot."
           action={
             <select
-              className="select-inline"
+              className="min-h-10 rounded border border-stone-300 bg-white px-3 text-sm text-stone-700 outline-none focus:border-emerald-700"
               value={period}
               onChange={(event) => setPeriod(event.target.value)}
             >
@@ -190,7 +194,7 @@ export function AdminView({
             </select>
           }
         />
-        <div className="report-grid">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           <ReportCard
             icon={CircleDollarSign}
             label="Paid sales"
@@ -213,34 +217,30 @@ export function AdminView({
             tint="blue"
           />
         </div>
-        <div className="chart-panel">
-          <div className="chart-title">
+        <div className="rounded-md border border-stone-200 bg-white p-4 sm:p-5">
+          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h3>Sales activity</h3>
-              <p>Paid transactions across the selected period</p>
+              <h3 className="font-semibold text-stone-900">Sales activity</h3>
+              <p className="mt-1 text-xs text-stone-500">Paid transactions across the selected period</p>
             </div>
             <button
-              className="button button-soft"
+              className={softButton}
               onClick={() => window.print()}
             >
               <Download size={15} /> Download report
             </button>
           </div>
           <SalesChart />
-          <div className="chart-legend">
-            <span>
-              <i className="legend-income" /> Income
-            </span>
-            <span>
-              <i className="legend-debt" /> Outcome
-            </span>
+          <div className="mt-3 flex gap-4 text-xs text-stone-600">
+            <span><i className="mr-1.5 inline-block size-2 rounded-full bg-emerald-600" />Income</span>
+            <span><i className="mr-1.5 inline-block size-2 rounded-full bg-orange-300" />Outcome</span>
           </div>
         </div>
       </section>
     );
   return (
     <>
-      <div className="stats-grid">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
         <StatCard
           label="Income today"
           value={money(incomeToday)}
@@ -276,51 +276,50 @@ export function AdminView({
           tint="blue"
         />
       </div>
-      <div className="dashboard-grid">
-        <section className="panel payments-panel">
+      <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(280px,.8fr)]">
+        <section className="min-w-0 rounded-md border border-stone-200 bg-white p-4">
           <SectionHead
             title="Recent payments"
             subtitle="The latest movement in your store."
             action={
-              <button className="text-link" onClick={() => setPage("Payments")}>
+              <button className={textButton} onClick={() => setPage("Payments")}>
                 View all <ArrowRight size={14} />
               </button>
             }
           />
           <PaymentsTable payments={payments.slice(0, 4)} compact />
         </section>
-        <aside className="panel snapshot-panel">
-          <div className="snapshot-heading">
+        <aside className="rounded-md border border-stone-200 bg-white p-4">
+          <div className="flex items-center justify-between">
             <div>
-              <span className="eyebrow">SALES SNAPSHOT</span>
-              <h3>Looking good.</h3>
+              <span className="text-[10px] font-bold text-stone-500">SALES SNAPSHOT</span>
+              <h3 className="mt-1 text-base font-semibold text-stone-900">Looking good.</h3>
             </div>
-            <span className="snapshot-spark">
+            <span className="grid size-8 place-items-center rounded bg-emerald-50 text-emerald-800">
               <Sparkles size={16} />
             </span>
           </div>
-          <div className="snapshot-total">
-            {money(incomeToday)}
-            <span>today</span>
+          <div className="my-4 text-2xl font-semibold text-stone-900">
+            {money(incomeToday)} <span className="text-xs font-normal text-stone-500">today</span>
           </div>
           <SalesChart reportData={reportData} />
-          <div className="snapshot-foot">
+          <div className="mt-3 flex items-center justify-between gap-3 text-xs text-stone-500">
             <span>
-              <i className="online-dot" /> 8 transactions
+              <i className="mr-1.5 inline-block size-2 rounded-full bg-emerald-500" /> 8 transactions
             </span>
-            <button className="text-link" onClick={() => setPage("Reports")}>
+            <button className={textButton} onClick={() => setPage("Reports")}>
               Full report <ArrowRight size={14} />
             </button>
           </div>
         </aside>
       </div>
-      <div className="dashboard-lower">
-        <section className="panel mini-panel">
+      <div className="mt-4 grid gap-4 xl:grid-cols-2">
+        <section className="rounded-md border border-stone-200 bg-white p-4">
           <SectionHead
             title="Needs a nudge"
             subtitle="Friendly reminders for open balances."
             action={
-              <button className="text-link" onClick={() => setPage("Debts")}>
+              <button className={textButton} onClick={() => setPage("Debts")}>
                 All debts <ArrowRight size={14} />
               </button>
             }
@@ -331,13 +330,13 @@ export function AdminView({
             compact
           />
         </section>
-        <section className="panel mini-panel returns-panel">
+        <section className="rounded-md border border-stone-200 bg-white p-4">
           <SectionHead
             title="Returns to review"
             subtitle="A quick look at customer requests."
             action={
               <button
-                className="text-link"
+                className={textButton}
                 onClick={() => setPage("Sales returns")}
               >
                 Review <ArrowRight size={14} />
@@ -351,14 +350,14 @@ export function AdminView({
           />
         </section>
       </div>
-      <div className="job-status">
+      <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3 rounded-md border border-stone-200 bg-white px-4 py-3 text-xs text-stone-600">
         <span>
           <Activity size={16} />
           <b>Background jobs</b>
         </span>
         <span>
           <i
-            className={`online-dot ${jobs.some((job) => job.job_name === "mobile_money_callbacks" && job.status === "failed") ? "job-failed" : ""}`}
+            className={`mr-1.5 inline-block size-2 rounded-full ${jobs.some((job) => job.job_name === "mobile_money_callbacks" && job.status === "failed") ? "bg-rose-500" : "bg-emerald-500"}`}
           />
           {jobs.find((job) => job.job_name === "mobile_money_callbacks")
             ?.status === "failed"
@@ -367,7 +366,7 @@ export function AdminView({
         </span>
         <span>
           <i
-            className={`online-dot ${jobs.some((job) => job.job_name.includes("email") && job.status === "failed") ? "job-failed" : ""}`}
+            className={`mr-1.5 inline-block size-2 rounded-full ${jobs.some((job) => job.job_name.includes("email") && job.status === "failed") ? "bg-rose-500" : "bg-emerald-500"}`}
           />
           {jobs.some(
             (job) => job.job_name.includes("email") && job.status === "failed",
@@ -376,7 +375,7 @@ export function AdminView({
             : "Email notifications operational"}
         </span>
         <button title="Settings">
-          <Settings2 size={16} />
+          <Settings2 size={16} className="ml-auto text-stone-500" />
         </button>
       </div>
     </>

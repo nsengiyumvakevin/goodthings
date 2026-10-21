@@ -48,7 +48,10 @@ router.patch(
 
     await Payment.updateOne(
       { _id: debt.payment_id },
-      { status: decision === "accept" ? "unpaid" : "failed" },
+      {
+        status: decision === "accept" ? "unpaid" : "failed",
+        ...(decision === "accept" ? { expires_at: debt.due_date } : {}),
+      },
     );
     if (decision === "accept") {
       await CartItem.updateMany(

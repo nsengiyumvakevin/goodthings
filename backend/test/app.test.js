@@ -46,6 +46,18 @@ test("debt payment routes require a client token", async () => {
   assert.equal(response.status, 401);
 });
 
+test("bill lookup and payment routes require a client token", async () => {
+  const billId = "TXN-20261021-4821";
+  const lookup = await fetch(`${baseUrl}/api/client/bills/${billId}`);
+  const payment = await fetch(`${baseUrl}/api/client/bills/${billId}/pay`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mobile_money_number: "+250700000000" }),
+  });
+  assert.equal(lookup.status, 401);
+  assert.equal(payment.status, 401);
+});
+
 test("debt review routes require an admin token", async () => {
   const response = await fetch(
     `${baseUrl}/api/admin/debts/not-a-debt/review`,
@@ -55,6 +67,11 @@ test("debt review routes require an admin token", async () => {
       body: JSON.stringify({ decision: "accept" }),
     },
   );
+  assert.equal(response.status, 401);
+});
+
+test("admin payment notifications require an admin token", async () => {
+  const response = await fetch(`${baseUrl}/api/admin/notifications`);
   assert.equal(response.status, 401);
 });
 
@@ -101,6 +118,7 @@ test("models use the requested MongoDB collection names", () => {
       Outcome: "outcome",
       SalesReturn: "sales_return",
       JobMonitoring: "job_monitoring",
+      Notification: "admin_notifications",
     },
   );
 });

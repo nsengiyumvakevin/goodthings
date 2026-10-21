@@ -100,6 +100,7 @@ const paymentSchema = new Schema(
         "pending",
         "paid",
         "failed",
+        "expired",
         "unpaid",
         "partial",
         "overdue",
@@ -108,6 +109,9 @@ const paymentSchema = new Schema(
       default: "pending",
     },
     debt_id: { type: Schema.Types.ObjectId, ref: "Debt" },
+    bill_id: { type: String, unique: true, sparse: true, index: true },
+    expires_at: Date,
+    momo_requested_at: Date,
     due_date: Date,
     paid_at: Date,
     reference: { type: String, unique: true, sparse: true },
@@ -136,12 +140,12 @@ const debtSchema = new Schema(
     due_date: { type: Date, required: true },
     status: {
       type: String,
-      enum: ["pending", "unpaid", "partial", "overdue", "settled", "rejected"],
+      enum: ["pending", "unpaid", "partial", "overdue", "settled", "rejected", "expired"],
       default: "unpaid",
     },
     review_status: {
       type: String,
-      enum: ["pending", "accepted", "rejected"],
+      enum: ["pending", "accepted", "rejected", "expired"],
       default: "accepted",
     },
     last_reminder_sent_at: Date,
@@ -157,6 +161,12 @@ const ledgerSchema = new Schema({
   amount: { type: Number, required: true, min: 0 },
   description: { type: String, required: true, trim: true },
   recorded_by: { type: Schema.Types.ObjectId, ref: "Admin", required: true },
+  payment_id: {
+    type: Schema.Types.ObjectId,
+    ref: "Payment",
+    unique: true,
+    sparse: true,
+  },
   date: { type: Date, default: Date.now },
 });
 
@@ -195,6 +205,22 @@ const jobMonitoringSchema = new Schema(
   { collection: "job_monitoring" },
 );
 
+const notificationSchema = new Schema(
+  {
+    admin_id: {
+      type: Schema.Types.ObjectId,
+      ref: "Admin",
+      required: true,
+      index: true,
+    },
+    payment_id: { type: Schema.Types.ObjectId, ref: "Payment", required: true },
+    client_id: { type: Schema.Types.ObjectId, ref: "Client", required: true },
+    message: { type: String, required: true },
+    read_at: Date,
+  },
+  { collection: "admin_notifications", timestamps: true },
+);
+
 module.exports = {
   Client: mongoose.model("Client", clientSchema),
   Admin: mongoose.model("Admin", adminSchema),
@@ -206,4 +232,5 @@ module.exports = {
   Outcome: mongoose.model("Outcome", ledgerSchema, "outcome"),
   SalesReturn: mongoose.model("SalesReturn", salesReturnSchema),
   JobMonitoring: mongoose.model("JobMonitoring", jobMonitoringSchema),
+  Notification: mongoose.model("Notification", notificationSchema),
 };

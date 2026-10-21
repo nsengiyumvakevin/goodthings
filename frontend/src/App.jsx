@@ -1,4 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
+import {
+  BrowserRouter,
+  Navigate,
+  NavLink,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+} from "react-router-dom";
 import { AdminView } from "./features/admin/AdminView.jsx";
 import { ClientView } from "./features/client/ClientView.jsx";
 import LandingPage from "./features/landing/LandingPage.jsx";
@@ -42,7 +51,6 @@ import {
   normalizeReturn,
 } from "./lib/normalize.js";
 import request from "./lib/api.js";
-import "./App.css";
 
 function encodeProductImage(file) {
   return new Promise((resolve, reject) => {
@@ -82,13 +90,43 @@ function encodeProductImage(file) {
   });
 }
 
-function App() {
+const adminRoutes = {
+  Overview: "/admin",
+  Payments: "/admin/payments",
+  Debts: "/admin/debts",
+  "Income & outcome": "/admin/ledger",
+  "Sales returns": "/admin/returns",
+  Products: "/admin/products",
+  Reports: "/admin/reports",
+};
+const clientRoutes = {
+  Shop: "/client/shop",
+  "My purchases": "/client/purchases",
+  "My debts": "/client/debts",
+  Returns: "/client/returns",
+};
+const routePages = Object.fromEntries(
+  Object.entries({ ...adminRoutes, ...clientRoutes }).map(([page, path]) => [
+    path,
+    page,
+  ]),
+);
+const formLayout = "grid gap-4";
+const formLabel = "grid gap-1.5 text-sm font-medium text-stone-700";
+const formControl =
+  "min-h-10 w-full rounded border border-stone-300 bg-white px-3 text-sm text-stone-900 outline-none focus:border-emerald-700 focus:ring-2 focus:ring-emerald-700/20";
+const primaryButton =
+  "inline-flex min-h-10 items-center justify-center gap-2 rounded bg-emerald-800 px-4 text-sm font-semibold text-white hover:bg-emerald-900 disabled:opacity-50";
+
+function AppShell() {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [role, setRole] = useState(
     () =>
       JSON.parse(localStorage.getItem("transaction-user") || "null")?.role ||
       "admin",
   );
-  const [page, setPage] = useState("Overview");
+  const page = routePages[location.pathname];
   const [auth, setAuth] = useState(() =>
     JSON.parse(localStorage.getItem("transaction-user") || "null"),
   );
@@ -110,6 +148,7 @@ function App() {
   const [products, setProducts] = useState(initialProducts);
   const [adminStats, setAdminStats] = useState(null);
   const [jobs, setJobs] = useState([]);
+  const [adminNotifications, setAdminNotifications] = useState([]);
   const [reportData, setReportData] = useState(null);
   const [cart, setCart] = useState([]);
   const [paymentMethod, setPaymentMethod] = useState("Mobile money");
@@ -197,7 +236,13 @@ function App() {
         localStorage.setItem("transaction-user", JSON.stringify(verifiedUser));
         setAuth(verifiedUser);
         setRole(session.role);
-        setPage(session.role === "admin" ? "Overview" : "Shop");
+        const routes = session.role === "admin" ? adminRoutes : clientRoutes;
+        const requestedPage = routePages[location.pathname];
+        navigate(
+          routes[requestedPage] ||
+            (session.role === "admin" ? adminRoutes.Overview : clientRoutes.Shop),
+          { replace: true },
+        );
       })
       .catch(() => {
         localStorage.removeItem("transaction-token");
@@ -205,10 +250,10 @@ function App() {
         setAuth(null);
       })
       .finally(() => setAuthChecking(false));
-  }, []);
+  }, [location.pathname, navigate]);
 
   useEffect(() => {
-    if (!auth?.token || authChecking) return;
+    if (!auth?.token || authChecking || !page) return;
     const load = async () => {
       try {
         if (auth.role === "admin") {
@@ -221,6 +266,7 @@ function App() {
             productData,
             overview,
             jobData,
+            notificationData,
           ] = await Promise.all([
             request("/admin/payments"),
             request("/admin/debts"),
@@ -230,6 +276,7 @@ function App() {
             request("/admin/products"),
             request("/admin/overview"),
             request("/admin/jobs"),
+            request("/admin/notifications"),
           ]);
           setPayments(paymentData.map(normalizePayment));
           setDebts(debtData.map(normalizeDebt));
@@ -247,6 +294,7 @@ function App() {
           setProducts(productData.map(normalizeProduct));
           setAdminStats(overview);
           setJobs(jobData);
+          setAdminNotifications(notificationData);
         } else {
           const [productData, debtData, returnData, purchaseData, cartData] =
             await Promise.all([
@@ -278,7 +326,7 @@ function App() {
       }
     };
     load();
-  }, [auth, authChecking]);
+  }, [auth, authChecking, page]);
 
   useEffect(() => {
     if (auth?.role !== "admin" || page !== "Reports") return;
@@ -296,7 +344,13 @@ function App() {
 
   function changeRole(nextRole) {
     setRole(nextRole);
-    setPage(nextRole === "admin" ? "Overview" : "Shop");
+    navigate(nextRole === "admin" ? adminRoutes.Overview : clientRoutes.Shop);
+    setMobileNav(false);
+  }
+
+  function setPage(nextPage) {
+    const route = (role === "admin" ? adminRoutes : clientRoutes)[nextPage];
+    if (route) navigate(route);
     setMobileNav(false);
   }
 
@@ -389,13 +443,13 @@ function App() {
           body: JSON.stringify({
             method: paymentMethod.toLowerCase().replaceAll(" ", "_"),
             period_days: Number(debtDays),
-            mobile_money_number: mobileNumber,
           }),
         });
-        setNotice(result.message || "Your order has been submitted.");
         if (result.payment)
           setPayments((items) => [normalizePayment(result.payment), ...items]);
         setCart([]);
+        setNotice(result.message || "Your bill has been created.");
+        navigate(clientRoutes["My purchases"]);
       } else {
         setNotice("Sign in as a client to place an order.");
         setAuthMode("login");
@@ -406,6 +460,36 @@ function App() {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function findBill(billId) {
+    const payment = normalizePayment(
+      await request(`/client/bills/${encodeURIComponent(billId)}`),
+    );
+    setPayments((items) => [
+      payment,
+      ...items.filter((item) => item.id !== payment.id),
+    ]);
+    return payment;
+  }
+
+  async function payBill(billId, phoneNumber) {
+    const result = await request(
+      `/client/bills/${encodeURIComponent(billId)}/pay`,
+      {
+        method: "POST",
+        body: JSON.stringify({ mobile_money_number: phoneNumber }),
+      },
+    );
+    if (result.payment) {
+      const payment = normalizePayment(result.payment);
+      setPayments((items) => [
+        payment,
+        ...items.filter((item) => item.id !== payment.id),
+      ]);
+    }
+    setNotice(result.message);
+    return result;
   }
 
   async function saveLedger(event) {
@@ -491,6 +575,31 @@ function App() {
       setNotice(error.message);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function openAdminNotifications() {
+    try {
+      setAdminNotifications(await request("/admin/notifications"));
+      setActiveModal("notifications");
+    } catch (error) {
+      setNotice(error.message);
+    }
+  }
+
+  async function markNotificationRead(notification) {
+    try {
+      const updated = await request(
+        `/admin/notifications/${notification._id}/read`,
+        { method: "PATCH" },
+      );
+      setAdminNotifications((items) =>
+        items.map((item) =>
+          item._id === notification._id ? updated : item,
+        ),
+      );
+    } catch (error) {
+      setNotice(error.message);
     }
   }
 
@@ -614,6 +723,7 @@ function App() {
       setNotice(result.message);
       if (result.payment)
         setPayments((items) => [normalizePayment(result.payment), ...items]);
+      navigate(clientRoutes["My purchases"]);
     } catch (error) {
       setNotice(error.message);
     } finally {
@@ -741,6 +851,7 @@ function App() {
     localStorage.removeItem("transaction-token");
     localStorage.removeItem("transaction-user");
     setAuth(null);
+    navigate("/");
     setNotice("You have been signed out");
   }
 
@@ -796,15 +907,75 @@ function App() {
     </Modal>
   ) : null;
 
+  const renderAdminPage = (routePage) => (
+    <AdminView
+      page={routePage}
+      payments={filteredPayments}
+      debts={filteredDebts}
+      returns={filteredReturns}
+      ledger={filteredLedger}
+      debtBalance={debtBalance}
+      filter={filter}
+      setFilter={setFilter}
+      setActiveModal={setActiveModal}
+      sendReminder={sendReminder}
+      updateReturn={updateReturn}
+      setPage={setPage}
+      period={period}
+      setPeriod={setPeriod}
+      products={visibleProducts}
+      incomeToday={adminStats?.income_today ?? paidToday}
+      outcomeToday={adminStats?.outcome_today ?? 0}
+      clientCount={adminStats?.clients ?? 0}
+      confirmCash={confirmCash}
+      reportData={reportData}
+      jobs={jobs}
+      onPartPayment={(debt) => {
+        setSelectedDebt(debt);
+        setActiveModal("part-payment");
+      }}
+      reviewDebt={reviewDebt}
+    />
+  );
+
+  const renderClientPage = (routePage) => (
+    <ClientView
+      page={routePage}
+      products={visibleProducts}
+      cart={cart}
+      cartCount={cartCount}
+      cartTotal={cartTotal}
+      addToCart={addToCart}
+      updateQuantity={updateQuantity}
+      paymentMethod={paymentMethod}
+      setPaymentMethod={setPaymentMethod}
+      mobileNumber={mobileNumber}
+      setMobileNumber={setMobileNumber}
+      createReturn={createReturn}
+      debtDays={debtDays}
+      setDebtDays={setDebtDays}
+      checkout={checkout}
+      loading={loading}
+      debts={filteredDebts}
+      returns={filteredReturns}
+      payments={filteredPayments}
+      setActiveModal={setActiveModal}
+      payDebt={payDebt}
+      findBill={findBill}
+      payBill={payBill}
+    />
+  );
+
   if (authChecking) {
     return (
-      <main className="auth-checking" aria-label="Checking account permissions">
+      <main className="grid min-h-screen place-items-center bg-stone-100" aria-label="Checking account permissions">
         <Spinner />
       </main>
     );
   }
 
   if (!auth?.token) {
+    if (location.pathname !== "/") return <Navigate to="/" replace />;
     return (
       <>
         <LandingPage
@@ -826,7 +997,7 @@ function App() {
         />
         {authDialog}
         {notice && (
-          <button className="toast" role="status" aria-live="polite" onClick={() => setNotice("")}>
+          <button className="fixed right-4 top-4 z-50 flex max-w-[min(440px,calc(100vw-2rem))] items-center gap-2.5 rounded-md bg-emerald-900 px-4 py-3 text-left text-sm text-white shadow-xl" role="status" aria-live="polite" onClick={() => setNotice("")}>
             <Check size={16} />
             {notice}
             <X size={15} />
@@ -836,77 +1007,80 @@ function App() {
     );
   }
 
+  const roleRoutes = role === "admin" ? adminRoutes : clientRoutes;
+  if (location.pathname === "/")
+    return <Navigate to={roleRoutes[role === "admin" ? "Overview" : "Shop"]} replace />;
+  if (!roleRoutes[page])
+    return <Navigate to={roleRoutes[role === "admin" ? "Overview" : "Shop"]} replace />;
+
   return (
-    <div className="app-frame">
-      <aside className={`sidebar ${mobileNav ? "sidebar-open" : ""}`}>
-        <a
-          className="brand"
-          href="#home"
-          onClick={(event) => event.preventDefault()}
+    <div className="min-h-screen bg-stone-100 text-stone-900 lg:grid lg:grid-cols-[248px_minmax(0,1fr)]">
+      <aside className={`fixed inset-y-0 left-0 z-30 flex h-screen w-65 flex-col bg-emerald-950 p-5 text-emerald-50 shadow-2xl transition-transform lg:sticky lg:top-0 lg:z-20 lg:w-auto lg:shadow-none ${mobileNav ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}`}>
+        <NavLink
+          className="flex items-center gap-3 text-lg font-bold leading-tight text-white no-underline"
+          to="/"
         >
-          <span className="brand-mark">
+          <span className="grid size-9 place-items-center rounded-lg bg-lime-200 text-emerald-950">
             <Sparkles size={18} strokeWidth={2.3} />
           </span>
           <span>
-            good<span className="brand-light">things</span>
-            <small>MARKET & LEDGER</small>
+            good<span className="font-medium text-emerald-200">things</span>
+            <small className="mt-1 block text-[9px] font-semibold text-emerald-200/75">MARKET & LEDGER</small>
           </span>
-        </a>
-        <div className="workspace-label">WORKSPACE</div>
-        <nav className="side-nav" aria-label={`${role} navigation`}>
+        </NavLink>
+        <div className="mb-3 mt-10 px-2 text-[10px] font-bold text-emerald-200/70">WORKSPACE</div>
+        <nav className="grid gap-1" aria-label={`${role} navigation`}>
           {navigation.map(([label, Icon]) => (
-            <button
-              className={`nav-item ${page === label ? "nav-active" : ""}`}
+            <NavLink
+              to={(role === "admin" ? adminRoutes : clientRoutes)[label]}
+              className={({ isActive }) => `flex min-h-11 items-center gap-3 rounded-md px-3 text-sm transition ${isActive ? "bg-lime-100 font-semibold text-emerald-950" : "text-emerald-100/80 hover:bg-white/10 hover:text-white"}`}
               key={label}
-              onClick={() => {
-                setPage(label);
-                setMobileNav(false);
-              }}
+              onClick={() => setMobileNav(false)}
             >
               <Icon size={18} strokeWidth={1.8} />
               <span>{label}</span>
               {label === "Sales returns" &&
                 returns.filter((item) => item.status === "Pending").length >
                   0 && (
-                  <i className="nav-count">
+                  <i className="ml-auto min-w-5 rounded-full bg-lime-200 px-1.5 py-0.5 text-center text-[10px] not-italic text-emerald-950">
                     {returns.filter((item) => item.status === "Pending").length}
                   </i>
                 )}
               {label === "Shop" && cartCount > 0 && (
-                <i className="nav-count">{cartCount}</i>
+                <i className="ml-auto min-w-5 rounded-full bg-lime-200 px-1.5 py-0.5 text-center text-[10px] not-italic text-emerald-950">{cartCount}</i>
               )}
-            </button>
+            </NavLink>
           ))}
         </nav>
-        <div className="sidebar-bottom">
-          <div className="help-card">
-            <span className="help-icon">
+        <div className="mt-auto">
+          <div className="mb-4 flex items-center gap-3 rounded-md border border-white/10 bg-white/5 p-3 text-emerald-100">
+            <span className="grid size-8 place-items-center rounded bg-white/10 text-lime-100">
               <Headphones size={17} />
             </span>
             <div>
-              <b>Need a hand?</b>
-              <small>We’re right here.</small>
+              <b className="block text-xs">Need a hand?</b>
+              <small className="mt-0.5 block text-[10px] text-emerald-100/70">We’re right here.</small>
             </div>
-            <ArrowRight size={15} />
+            <ArrowRight className="ml-auto" size={15} />
           </div>
-          <div className="user-row">
-            <div className="avatar avatar-dark">
+          <div className="flex items-center gap-2.5 border-t border-white/15 pt-3">
+            <div className="grid size-9 shrink-0 place-items-center rounded-full bg-lime-100 text-xs font-bold text-emerald-950">
               {initials(
                 auth?.full_name ||
                   `${auth?.first_name || "Amara"} ${auth?.last_name || "Uwase"}`,
               )}
             </div>
-            <div className="user-copy">
-              <b>
+            <div className="min-w-0 flex-1">
+              <b className="block truncate text-xs text-white">
                 {auth?.full_name ||
                   `${auth?.first_name || "Amara"} ${auth?.last_name || "Uwase"}`}
               </b>
-              <small>
+              <small className="mt-0.5 block text-[10px] text-emerald-100/70">
                 {role === "admin" ? "Store administrator" : "Customer account"}
               </small>
             </div>
             <button
-              className="icon-button user-more"
+              className="grid size-9 place-items-center rounded text-emerald-100 hover:bg-white/10"
               title="Sign out"
               onClick={logout}
             >
@@ -918,29 +1092,30 @@ function App() {
 
       {mobileNav && (
         <button
-          className="nav-scrim"
+          className="fixed inset-0 z-20 bg-stone-950/40 lg:hidden"
           aria-label="Close menu"
           onClick={() => setMobileNav(false)}
         />
       )}
-      <main className="main-area">
-        <header className="topbar">
+      <main className="flex min-h-screen min-w-0 flex-col">
+        <header className="sticky top-0 z-10 flex min-h-17 items-center gap-3 border-b border-stone-200 bg-white/95 px-3 backdrop-blur sm:justify-between sm:px-6 lg:px-9">
           <button
-            className="icon-button mobile-menu"
+            className="grid size-9 shrink-0 place-items-center rounded text-stone-600 hover:bg-stone-100 lg:hidden"
             title="Open navigation"
             onClick={() => setMobileNav(true)}
           >
             <Menu size={20} />
           </button>
-          <div className="breadcrumbs">
-            <span>Workspace</span>
-            <span className="crumb-slash">/</span>
-            <b>{page}</b>
+          <div className="flex items-center gap-2 text-xs text-stone-500">
+            <span className="hidden sm:inline">Workspace</span>
+            <span className="hidden text-stone-300 sm:inline">/</span>
+            <b className="text-stone-900">{page}</b>
           </div>
-          <div className="top-actions">
-            <label className="search-box">
-              <Search size={16} />
+          <div className="ml-auto flex min-w-0 items-center gap-1.5 sm:gap-3">
+            <label className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-md border border-stone-200 bg-stone-50 px-2.5 text-stone-500 sm:w-64 sm:flex-none">
+              <Search className="shrink-0" size={16} />
               <input
+                className="w-full min-w-0 bg-transparent text-xs text-stone-900 outline-none placeholder:text-stone-400"
                 aria-label="Search"
                 placeholder={
                   role === "admin"
@@ -950,19 +1125,14 @@ function App() {
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
               />
-              <kbd>⌘ K</kbd>
+              <kbd className="hidden whitespace-nowrap rounded border border-stone-200 bg-white px-1 text-[10px] text-stone-500 md:inline">⌘ K</kbd>
             </label>
             <button
-              className="icon-button notification-button"
+              className="relative grid size-9 shrink-0 place-items-center rounded text-stone-600 hover:bg-stone-100"
               title="Notifications"
               onClick={async () => {
-                const latest = payments[0];
                 if (role === "admin") {
-                  setNotice(
-                    latest
-                      ? `${latest.name} · ${money(latest.amount)} · ${latest.method} · ${latest.status}`
-                      : "No recent payment updates.",
-                  );
+                  await openAdminNotifications();
                   return;
                 }
                 try {
@@ -997,42 +1167,42 @@ function App() {
               }}
             >
               <Bell size={18} />
-              <i />
+              {adminNotifications.some((notification) => !notification.read_at) && <i className="absolute right-1.5 top-1.5 size-2 rounded-full border border-white bg-orange-500" />}
             </button>
           </div>
         </header>
 
         {notice && (
-          <button className="toast" role="status" aria-live="polite" onClick={() => setNotice("")}>
+          <button className="fixed right-4 top-19 z-40 flex max-w-[min(440px,calc(100vw-2rem))] items-center gap-2.5 rounded-md bg-emerald-900 px-4 py-3 text-left text-sm text-white shadow-xl" role="status" aria-live="polite" onClick={() => setNotice("")}>
             <Check size={16} />
             {notice}
             <X size={15} />
           </button>
         )}
 
-        <div className="page-content">
-          <div className="page-heading">
+        <div className="mx-auto w-full max-w-375 flex-1 px-3 py-6 sm:px-5 lg:px-9 lg:py-8">
+          <div className="mb-6 flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-end">
             <div>
-              <div className="eyebrow">
-                SUNDAY, OCTOBER 18, 2026 <span>·</span>{" "}
+              <div className="mb-2 text-[10px] font-bold text-stone-500">
+                {new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })} <span className="px-1 text-stone-300">·</span>{" "}
                 {role === "admin" ? "STORE OVERVIEW" : "YOUR LITTLE CORNER"}
               </div>
-              <h1>
+              <h1 className="mb-2 text-3xl font-semibold leading-tight text-stone-950 sm:text-4xl">
                 {page === "Overview" ? (
                   <>
                     A lovely day to
-                    <br className="mobile-break" /> make things <em>happen.</em>
+                    <br className="hidden sm:block" /> make things <em className="font-serif font-medium text-emerald-800">happen.</em>
                   </>
                 ) : page === "Shop" ? (
                   <>
                     A little something
-                    <br className="mobile-break" /> for <em>every day.</em>
+                    <br className="hidden sm:block" /> for <em className="font-serif font-medium text-emerald-800">every day.</em>
                   </>
                 ) : (
                   pageTitle
                 )}
               </h1>
-              <p>
+              <p className="max-w-2xl text-sm leading-6 text-stone-600">
                 {page === "Overview"
                   ? "Here’s what’s happening with your shop today."
                   : page === "Shop"
@@ -1042,12 +1212,12 @@ function App() {
                       : "Everything you need, all in one place."}
               </p>
             </div>
-            <div className="heading-actions">
-              <button className="button button-soft" onClick={exportReport}>
+            <div className="flex w-full gap-2 sm:w-auto">
+              <button className="inline-flex min-h-10 flex-1 items-center justify-center gap-2 rounded border border-stone-200 bg-white px-3 text-sm font-medium text-stone-700 hover:bg-stone-50 sm:flex-none" onClick={exportReport}>
                 <Download size={16} /> Export
               </button>
               <button
-                className="button button-primary"
+                className="inline-flex min-h-10 flex-1 items-center justify-center gap-2 rounded bg-emerald-800 px-4 text-sm font-semibold text-white hover:bg-emerald-900 sm:flex-none"
                 onClick={() =>
                   role === "admin" ? setActiveModal("record") : setPage("Shop")
                 }
@@ -1058,76 +1228,59 @@ function App() {
             </div>
           </div>
 
-          {role === "admin" && (
-            <AdminView
-              page={page}
-              payments={filteredPayments}
-              debts={filteredDebts}
-              returns={filteredReturns}
-              ledger={filteredLedger}
-              debtBalance={debtBalance}
-              filter={filter}
-              setFilter={setFilter}
-              setActiveModal={setActiveModal}
-              sendReminder={sendReminder}
-              updateReturn={updateReturn}
-              setPage={setPage}
-              period={period}
-              setPeriod={setPeriod}
-              products={visibleProducts}
-              incomeToday={adminStats?.income_today ?? paidToday}
-              outcomeToday={adminStats?.outcome_today ?? 0}
-              clientCount={adminStats?.clients ?? 0}
-              confirmCash={confirmCash}
-              reportData={reportData}
-              jobs={jobs}
-              onPartPayment={(debt) => {
-                setSelectedDebt(debt);
-                setActiveModal("part-payment");
-              }}
-              reviewDebt={reviewDebt}
+          <Routes>
+            {Object.entries(adminRoutes).map(([routePage, path]) => (
+              <Route
+                key={path}
+                path={path}
+                element={
+                  role === "admin" ? (
+                    renderAdminPage(routePage)
+                  ) : (
+                    <Navigate to={clientRoutes.Shop} replace />
+                  )
+                }
+              />
+            ))}
+            {Object.entries(clientRoutes).map(([routePage, path]) => (
+              <Route
+                key={path}
+                path={path}
+                element={
+                  role === "client" ? (
+                    renderClientPage(routePage)
+                  ) : (
+                    <Navigate to={adminRoutes.Overview} replace />
+                  )
+                }
+              />
+            ))}
+            <Route
+              path="*"
+              element={
+                <Navigate
+                  to={role === "admin" ? adminRoutes.Overview : clientRoutes.Shop}
+                  replace
+                />
+              }
             />
-          )}
-          {role === "client" && (
-            <ClientView
-              page={page}
-              products={visibleProducts}
-              cart={cart}
-              cartCount={cartCount}
-              cartTotal={cartTotal}
-              addToCart={addToCart}
-              updateQuantity={updateQuantity}
-              paymentMethod={paymentMethod}
-              setPaymentMethod={setPaymentMethod}
-              mobileNumber={mobileNumber}
-              setMobileNumber={setMobileNumber}
-              createReturn={createReturn}
-              debtDays={debtDays}
-              setDebtDays={setDebtDays}
-              checkout={checkout}
-              loading={loading}
-              debts={filteredDebts}
-              returns={filteredReturns}
-              payments={filteredPayments}
-              setActiveModal={setActiveModal}
-              payDebt={payDebt}
-            />
-          )}
+          </Routes>
         </div>
       </main>
 
       {activeModal === "record" && (
         <Modal title="Record a transaction" onClose={() => setActiveModal("")}>
           <form
-            className="stack-form"
+            className={formLayout}
             onSubmit={(event) => {
               saveLedger(event);
               setActiveModal("");
             }}
           >
-            <label>
+            <label className={formLabel}>
               Type
               <select
+                className={formControl}
                 value={incomeType}
                 onChange={(event) => setIncomeType(event.target.value)}
               >
@@ -1135,25 +1288,27 @@ function App() {
                 <option>Outcome</option>
               </select>
             </label>
-            <label>
+            <label className={formLabel}>
               Amount
               <input
                 name="amount"
+                className={formControl}
                 type="number"
                 min="1"
                 placeholder="0"
                 required
               />
             </label>
-            <label>
+            <label className={formLabel}>
               Description
               <input
+                className={formControl}
                 name="description"
                 placeholder="What was this for?"
                 required
               />
             </label>
-            <button className="button button-primary" disabled={loading}>
+            <button className={primaryButton} disabled={loading}>
               {loading ? <Spinner /> : <Plus size={16} />} Save{" "}
               {incomeType.toLowerCase()}
             </button>
@@ -1162,40 +1317,40 @@ function App() {
       )}
       {activeModal === "product" && (
         <Modal title="Add a product" onClose={() => setActiveModal("")}>
-          <form className="stack-form" onSubmit={saveProduct}>
-            <label>
+          <form className={formLayout} onSubmit={saveProduct}>
+            <label className={formLabel}>
               Product name
-              <input name="name" required />
+              <input className={formControl} name="name" required />
             </label>
-            <div className="two-fields">
-              <label>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className={formLabel}>
                 Category
-                <input name="category" required />
+                <input className={formControl} name="category" required />
               </label>
-              <label>
+              <label className={formLabel}>
                 Price (RWF)
-                <input name="price" type="number" min="0" required />
+                <input className={formControl} name="price" type="number" min="0" required />
               </label>
             </div>
-            <div className="two-fields">
-              <label>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className={formLabel}>
                 Stock quantity
-                <input name="stock_quantity" type="number" min="0" required />
+                <input className={formControl} name="stock_quantity" type="number" min="0" required />
               </label>
-              <label>
+              <label className={formLabel}>
                 Product photo
-                <input name="image" type="file" accept="image/*" />
+                <input className="block w-full text-sm text-stone-600 file:mr-3 file:rounded file:border-0 file:bg-emerald-50 file:px-3 file:py-2 file:text-xs file:font-semibold file:text-emerald-800 hover:file:bg-emerald-100" name="image" type="file" accept="image/*" />
               </label>
             </div>
-            <label>
+            <label className={formLabel}>
               Or image URL
-              <input name="image_url" type="url" />
+              <input className={formControl} name="image_url" type="url" />
             </label>
-            <label>
+            <label className={formLabel}>
               Description
-              <textarea name="description" />
+              <textarea className={`${formControl} min-h-24 py-2`} name="description" />
             </label>
-            <button className="button button-primary" disabled={loading}>
+            <button className={primaryButton} disabled={loading}>
               {loading ? <Spinner /> : <Boxes size={16} />} Add product
             </button>
           </form>
@@ -1206,39 +1361,74 @@ function App() {
           title={`Record payment · ${selectedDebt.name}`}
           onClose={() => setActiveModal("")}
         >
-          <form className="stack-form" onSubmit={savePartPayment}>
-            <p className="form-intro">
+          <form className={formLayout} onSubmit={savePartPayment}>
+            <p className="text-sm text-stone-600">
               Remaining balance: {money(selectedDebt.balance)}
             </p>
-            <label>
+            <label className={formLabel}>
               Amount received (RWF)
               <input
                 name="amount"
+                className={formControl}
                 type="number"
                 min="1"
                 max={selectedDebt.balance}
                 required
               />
             </label>
-            <button className="button button-primary" disabled={loading}>
+            <button className={primaryButton} disabled={loading}>
               {loading ? <Spinner /> : <CircleDollarSign size={16} />} Record
               payment
             </button>
           </form>
         </Modal>
       )}
+      {activeModal === "notifications" && (
+        <Modal
+          title="Payment notifications"
+          onClose={() => setActiveModal("")}
+        >
+          <div className="grid gap-2">
+            {adminNotifications.map((notification) => (
+              <article className={`rounded border p-3 ${notification.read_at ? "border-stone-200 bg-white" : "border-emerald-200 bg-emerald-50"}`} key={notification._id}>
+                <p className="mb-2 text-sm text-stone-800">{notification.message}</p>
+                <small className="block text-xs text-stone-500">
+                  {new Date(notification.createdAt).toLocaleString()}
+                </small>
+                {!notification.read_at && (
+                  <button
+                    className="mt-2 text-xs font-semibold text-emerald-800 hover:underline"
+                    onClick={() => markNotificationRead(notification)}
+                  >
+                    Mark read
+                  </button>
+                )}
+              </article>
+            ))}
+            {adminNotifications.length === 0 && (
+              <p className="text-sm text-stone-600">No payment notifications yet.</p>
+            )}
+          </div>
+        </Modal>
+      )}
       {authDialog}
 
-      <footer className="app-footer">
+      <footer className="flex flex-col gap-2 border-t border-stone-200 px-3 py-4 text-xs text-stone-500 sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-9">
         <span>
           goodthings market <b>·</b> A little better, every day.
         </span>
         <span>
-          <i className="online-dot" /> All systems operational
+          <i className="mr-1.5 inline-block size-2 rounded-full bg-emerald-500" /> All systems operational
         </span>
       </footer>
     </div>
   );
 }
 
-export default App;
+export default function App() {
+  return (
+    <BrowserRouter>
+      <AppShell />
+    </BrowserRouter>
+  );
+}
