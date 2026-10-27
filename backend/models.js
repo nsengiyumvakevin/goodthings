@@ -14,8 +14,10 @@ const clientSchema = new Schema(
       trim: true,
     },
     password_hash: { type: String, required: true },
-    reset_token_hash: String,
-    reset_token_expires_at: Date,
+    reset_code_hash: String,
+    reset_code_expires_at: Date,
+    reset_code_attempts: { type: Number, default: 0 },
+    reset_code_used_at: Date,
   },
   {
     collection: "clients",
@@ -47,6 +49,7 @@ const productSchema = new Schema(
     description: { type: String, default: "" },
     category: { type: String, required: true, trim: true },
     price: { type: Number, required: true, min: 0 },
+    cost_price: { type: Number, min: 0, default: null, select: false },
     stock_quantity: { type: Number, required: true, min: 0, default: 0 },
     image_url: { type: String, default: "" },
     status: { type: String, enum: ["active", "inactive"], default: "active" },
@@ -68,6 +71,7 @@ const cartItemSchema = new Schema(
     product_id: { type: Schema.Types.ObjectId, ref: "Product", required: true },
     quantity: { type: Number, min: 1, required: true },
     unit_price: { type: Number, min: 0, required: true },
+    unit_cost: { type: Number, min: 0, default: null, select: false },
     returned_quantity: { type: Number, min: 0, default: 0 },
     status: {
       type: String,
@@ -112,6 +116,8 @@ const paymentSchema = new Schema(
     bill_id: { type: String, unique: true, sparse: true, index: true },
     expires_at: Date,
     momo_requested_at: Date,
+    mobile_money_number: String,
+    failure_reason: String,
     due_date: Date,
     paid_at: Date,
     reference: { type: String, unique: true, sparse: true },
@@ -194,6 +200,11 @@ const salesReturnSchema = new Schema(
 const jobMonitoringSchema = new Schema(
   {
     job_name: { type: String, required: true, unique: true },
+    priority: {
+      type: String,
+      enum: ["high", "medium", "low"],
+      default: "medium",
+    },
     status: {
       type: String,
       enum: ["ok", "running", "failed", "waiting"],

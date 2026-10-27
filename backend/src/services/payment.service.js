@@ -94,11 +94,22 @@ async function recordPaidBill(payment, client) {
   );
 }
 
-async function applyPaymentResult(payment, successful) {
+async function applyPaymentResult(payment, successful, failureReason = "") {
   if (payment.expires_at && payment.expires_at <= new Date()) {
     await expireBill(payment);
     return;
   }
+  const update = successful
+    ? {
+        $set: { status: "paid", paid_at: new Date() },
+        $unset: { failure_reason: 1 },
+      }
+    : {
+        $set: {
+          status: "failed",
+          failure_reason: failureReason || "Payment was not completed.",
+        },
+      };
   const updated = await Payment.findOneAndUpdate(
     {
       _id: payment._id,
@@ -109,7 +120,7 @@ async function applyPaymentResult(payment, successful) {
         { expires_at: { $gt: new Date() } },
       ],
     },
-    successful ? { status: "paid", paid_at: new Date() } : { status: "failed" },
+    update,
     { new: true },
   );
   if (!updated) return;
@@ -222,15 +233,28 @@ async function momoAccessToken(baseUrl, subscriptionKey) {
   return accessToken;
 }
 
+function normalizeRwandaPhone(value) {
+  let digits = String(value || "").replace(/\D/g, "");
+  if (digits.startsWith("250")) digits = digits.slice(3);
+  if (digits.length === 9 && digits.startsWith("7")) digits = `0${digits}`;
+  if (!/^07[89]\d{7}$/.test(digits)) {
+    throw Object.assign(
+      new Error(
+        "Enter a valid Rwandan mobile money number, for example 0781234567 or 0791234567.",
+      ),
+      { status: 400 },
+    );
+  }
+  return digits;
+}
+
+function toMsisdn(phoneNumber) {
+  return `250${normalizeRwandaPhone(phoneNumber).slice(1)}`;
+}
+
 async function requestMobileMoney(payment, phoneNumber) {
   const { baseUrl, subscriptionKey } = momoConfiguration();
-  const phone = String(phoneNumber || "").replace(/[^0-9]/g, "");
-  if (phone.length < 9 || phone.length > 15) {
-    throw Object.assign(new Error("Enter a valid mobile money phone number."), {
-      status: 400,
-    });
-  }
-
+  const phone = normalizeRwandaPhone(phoneNumber);
   const accessToken = await momoAccessToken(baseUrl, subscriptionKey);
   const callbackUrl =
     process.env.MOMO_CALLBACK_URL ||
@@ -249,7 +273,7 @@ async function requestMobileMoney(payment, phoneNumber) {
       amount: String(Math.round(payment.amount)),
       currency: process.env.MOMO_CURRENCY || "RWF",
       externalId: payment.bill_id || payment.reference,
-      payer: { partyIdType: "MSISDN", partyId: phone },
+      payer: { partyIdType: "MSISDN", partyId: toMsisdn(phone) },
       payerMessage: "Purchase payment",
       payeeNote: `Bill ${payment.bill_id || payment.reference}`,
     }),
@@ -260,7 +284,7 @@ async function requestMobileMoney(payment, phoneNumber) {
       { status: 502 },
     );
   }
-  return { reference: payment.reference, status: "pending" };
+  return { reference: payment.reference, status: "pending", phone };
 }
 
 async function verifyMobileMoneyPayment(reference) {
@@ -282,12 +306,94 @@ async function verifyMobileMoneyPayment(reference) {
       { status: 502 },
     );
   const result = await response.json();
-  return String(result.status || "").toUpperCase();
+  return {
+    status: String(result.status || "").toUpperCase(),
+    amount: result.amount,
+    currency: String(result.currency || "").toUpperCase(),
+    reason: result.reason,
+  };
+}
+
+function providerReason(result) {
+  if (!result?.reason) return "";
+  if (typeof result.reason === "string") return result.reason;
+  return result.reason.message || result.reason.code || "";
+}
+
+function amountAndCurrencyMatch(payment, result) {
+  const expectedAmount = Math.round(Number(payment.amount));
+  const receivedAmount = Number(result.amount);
+  const expectedCurrency = String(
+    process.env.MOMO_CURRENCY || "RWF",
+  ).toUpperCase();
+  return (
+    Number.isFinite(receivedAmount) &&
+    Math.round(receivedAmount) === expectedAmount &&
+    result.currency === expectedCurrency
+  );
+}
+
+async function reconcileMobileMoneyPayment(payment) {
+  if (
+    payment.method !== "mobile_money" ||
+    payment.status !== "pending" ||
+    !payment.reference
+  )
+    return payment;
+  const result = await verifyMobileMoneyPayment(payment.reference);
+  if (["SUCCESSFUL", "SUCCESS", "PAID"].includes(result.status)) {
+    if (!amountAndCurrencyMatch(payment, result)) {
+      await applyPaymentResult(
+        payment,
+        false,
+        `Mobile money confirmed ${result.amount || "an unknown amount"} ${result.currency || "in an unknown currency"}, but the bill was RWF ${Number(payment.amount).toLocaleString()}.`,
+      );
+      return Payment.findById(payment._id);
+    }
+    await applyPaymentResult(payment, true);
+    return Payment.findById(payment._id);
+  }
+  if (["FAILED", "REJECTED", "EXPIRED", "TIMEOUT"].includes(result.status)) {
+    await applyPaymentResult(
+      payment,
+      false,
+      providerReason(result) ||
+        `Mobile money reported the payment as ${result.status.toLowerCase()}.`,
+    );
+    return Payment.findById(payment._id);
+  }
+  return payment;
+}
+
+async function reconcilePendingMobileMoneyPayments(limit = 20) {
+  const payments = await Payment.find({
+    method: "mobile_money",
+    status: "pending",
+    momo_requested_at: { $ne: null },
+    expires_at: { $gt: new Date() },
+  })
+    .sort({ momo_requested_at: 1 })
+    .limit(limit);
+  let checked = 0;
+  let completed = 0;
+  for (const payment of payments) {
+    try {
+      checked += 1;
+      const updated = await reconcileMobileMoneyPayment(payment);
+      if (updated && updated.status !== "pending") completed += 1;
+    } catch {
+      // The next worker run will retry payments MTN could not be reached for.
+    }
+  }
+  return { checked, completed };
 }
 
 module.exports = {
   applyPaymentResult,
   expirePendingBills,
+  normalizeRwandaPhone,
+  reconcileMobileMoneyPayment,
+  reconcilePendingMobileMoneyPayments,
   requestMobileMoney,
   verifyMobileMoneyPayment,
 };

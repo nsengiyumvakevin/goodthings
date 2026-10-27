@@ -29,22 +29,4 @@ router.get(
   }),
 );
 
-router.post(
-  "/ledger/:type",
-  asyncRoute(async (req, res) => {
-    const Ledger = getLedger(req.params.type);
-    if (!Ledger)
-      return res
-        .status(400)
-        .json({ error: "Ledger type must be income or outcome." });
-    const record = await Ledger.create({
-      amount: Number(req.body.amount),
-      description: req.body.description,
-      date: req.body.date || new Date(),
-      recorded_by: req.auth.sub,
-    });
-    res.status(201).json(record);
-  }),
-);
-
 module.exports = router;

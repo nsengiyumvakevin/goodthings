@@ -9,6 +9,13 @@ const authenticate = require("../middleware/authenticate");
 
 const router = express.Router();
 
+const RESET_CODE_TTL_MS = 10 * 60 * 1000;
+const RESET_CODE_MAX_ATTEMPTS = 5;
+
+function createResetCode() {
+  return String(crypto.randomInt(0, 1000000)).padStart(6, "0");
+}
+
 function createToken(account, role) {
   if (process.env.NODE_ENV === "production" && !process.env.JWT_SECRET) {
     throw Object.assign(
@@ -162,30 +169,28 @@ router.post(
     const email = String(req.body.email || "")
       .trim()
       .toLowerCase();
-    const client = await Client.findOne({ email });
     const response = {
       message:
-        "If the account exists, password reset instructions have been sent.",
+        "If the account exists, a 6-digit reset code has been sent to that email.",
     };
+    const client = await Client.findOne({ email });
     if (!client) return res.json(response);
 
-    const token = crypto.randomBytes(32).toString("hex");
-    client.reset_token_hash = crypto
-      .createHash("sha256")
-      .update(token)
-      .digest("hex");
-    client.reset_token_expires_at = new Date(Date.now() + 30 * 60 * 1000);
+    const code = createResetCode();
+    client.reset_code_hash = await bcrypt.hash(code, 10);
+    client.reset_code_expires_at = new Date(Date.now() + RESET_CODE_TTL_MS);
+    client.reset_code_attempts = 0;
+    client.reset_code_used_at = undefined;
     await client.save();
-    const appUrl = process.env.APP_URL || "http://localhost:5173";
     try {
       await sendEmail({
         to: client.email,
-        subject: "Reset your password",
-        text: `Use this one-time reset token within 30 minutes: ${token}\n\nReset page: ${appUrl}/?reset=${token}`,
+        subject: "Your password reset code",
+        text: `Your Goodthings Market password reset code is ${code}.\n\nIt expires in 10 minutes and can only be used once. If you did not request this, you can ignore this email.`,
       });
     } catch (error) {
       if (process.env.NODE_ENV === "production") throw error;
-      response.development_reset_token = token;
+      response.development_reset_code = code;
     }
     res.json(response);
   }),
@@ -194,27 +199,60 @@ router.post(
 router.post(
   "/reset-password",
   asyncRoute(async (req, res) => {
-    const { token, password } = req.body;
+    const email = String(req.body.email || "")
+      .trim()
+      .toLowerCase();
+    const code = String(req.body.code || "").trim();
+    const { password } = req.body;
+    const invalidMessage = "This reset code is invalid or has expired.";
     if (typeof password !== "string" || password.length < 8) {
       return res
         .status(400)
         .json({ error: "Password must be at least 8 characters." });
     }
-    const tokenHash = crypto
-      .createHash("sha256")
-      .update(String(token || ""))
-      .digest("hex");
-    const client = await Client.findOne({
-      reset_token_hash: tokenHash,
-      reset_token_expires_at: { $gt: new Date() },
-    });
-    if (!client)
+    if (!/^\d{6}$/.test(code)) {
       return res
         .status(400)
-        .json({ error: "This reset link is invalid or has expired." });
+        .json({ error: "Enter the 6-digit code sent to your email." });
+    }
+    const client = await Client.findOne({ email });
+    if (
+      !client ||
+      !client.reset_code_hash ||
+      client.reset_code_used_at ||
+      !client.reset_code_expires_at ||
+      client.reset_code_expires_at <= new Date()
+    ) {
+      return res.status(400).json({ error: invalidMessage });
+    }
+    if ((client.reset_code_attempts || 0) >= RESET_CODE_MAX_ATTEMPTS) {
+      client.reset_code_hash = undefined;
+      client.reset_code_expires_at = undefined;
+      await client.save();
+      return res
+        .status(429)
+        .json({ error: "Too many incorrect attempts. Request a new code." });
+    }
+    if (!(await bcrypt.compare(code, client.reset_code_hash))) {
+      client.reset_code_attempts = (client.reset_code_attempts || 0) + 1;
+      if (client.reset_code_attempts >= RESET_CODE_MAX_ATTEMPTS) {
+        client.reset_code_hash = undefined;
+        client.reset_code_expires_at = undefined;
+        await client.save();
+        return res
+          .status(429)
+          .json({ error: "Too many incorrect attempts. Request a new code." });
+      }
+      await client.save();
+      return res
+        .status(400)
+        .json({ error: "The reset code is incorrect." });
+    }
     client.password_hash = await bcrypt.hash(password, 12);
-    client.reset_token_hash = undefined;
-    client.reset_token_expires_at = undefined;
+    client.reset_code_used_at = new Date();
+    client.reset_code_hash = undefined;
+    client.reset_code_expires_at = undefined;
+    client.reset_code_attempts = 0;
     await client.save();
     res.json({ message: "Password updated. You can now sign in." });
   }),

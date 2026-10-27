@@ -31,6 +31,8 @@ import {
   Search,
   ShoppingBag,
   Sparkles,
+  Moon,
+  Sun,
   X,
 } from "lucide-react";
 import { AuthForm, Modal, Spinner } from "./components/shared.jsx";
@@ -112,9 +114,10 @@ const routePages = Object.fromEntries(
   ]),
 );
 const formLayout = "grid gap-4";
-const formLabel = "grid gap-1.5 text-sm font-medium text-stone-700";
+const formLabel =
+  "grid gap-1.5 text-sm font-medium text-stone-700 dark:text-stone-300";
 const formControl =
-  "min-h-10 w-full rounded border border-stone-300 bg-white px-3 text-sm text-stone-900 outline-none focus:border-emerald-700 focus:ring-2 focus:ring-emerald-700/20";
+  "min-h-10 w-full rounded border border-stone-300 bg-white px-3 text-sm text-stone-900 outline-none focus:border-emerald-700 focus:ring-2 focus:ring-emerald-700/20 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-100";
 const primaryButton =
   "inline-flex min-h-10 items-center justify-center gap-2 rounded bg-emerald-800 px-4 text-sm font-semibold text-white hover:bg-emerald-900 disabled:opacity-50";
 
@@ -133,9 +136,7 @@ function AppShell() {
   const [authChecking, setAuthChecking] = useState(() =>
     Boolean(localStorage.getItem("transaction-token")),
   );
-  const [showAuth, setShowAuth] = useState(() =>
-    Boolean(new URLSearchParams(window.location.search).get("reset")),
-  );
+  const [showAuth, setShowAuth] = useState(false);
   const [authMode, setAuthMode] = useState("login");
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(false);
@@ -157,8 +158,15 @@ function AppShell() {
   const [activeModal, setActiveModal] = useState("");
   const [selectedDebt, setSelectedDebt] = useState(null);
   const [mobileNav, setMobileNav] = useState(false);
-  const [incomeType, setIncomeType] = useState("Income");
   const [period, setPeriod] = useState("This month");
+  const [theme, setTheme] = useState(
+    () => localStorage.getItem("transaction-theme") || "light",
+  );
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", theme === "dark");
+    localStorage.setItem("transaction-theme", theme);
+  }, [theme]);
 
   useEffect(() => {
     if (!notice) return undefined;
@@ -329,7 +337,11 @@ function AppShell() {
   }, [auth, authChecking, page]);
 
   useEffect(() => {
-    if (auth?.role !== "admin" || page !== "Reports") return;
+    if (
+      auth?.role !== "admin" ||
+      !["Overview", "Products", "Reports"].includes(page)
+    )
+      return;
     const end = new Date();
     const start = new Date(end);
     if (period === "This week") start.setDate(start.getDate() - 7);
@@ -435,6 +447,7 @@ function AppShell() {
 
   async function checkout() {
     if (!cart.length) return;
+    if (paymentMethod === "Mobile money") return;
     setLoading(true);
     try {
       if (auth?.token) {
@@ -460,6 +473,50 @@ function AppShell() {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function startMobileMoneyCheckout(phoneNumber) {
+    setLoading(true);
+    try {
+      const result = await request("/client/checkout", {
+        method: "POST",
+        body: JSON.stringify({
+          method: "mobile_money",
+          mobile_money_number: phoneNumber,
+        }),
+      });
+      if (result.payment)
+        setPayments((items) => [normalizePayment(result.payment), ...items]);
+      setNotice(result.message || "Approve the payment on your phone.");
+      return result.payment;
+    } catch (error) {
+      setNotice(error.message);
+      throw error;
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function checkMobileMoneyStatus(payment) {
+    if (!payment?.bill_id)
+      throw new Error("A bill reference is required to check payment status.");
+    const result = await request(
+      `/client/bills/${encodeURIComponent(payment.bill_id)}/status`,
+    );
+    if (result.verification_error) throw new Error(result.verification_error);
+    const checked = normalizePayment(result);
+    setPayments((items) => [
+      checked,
+      ...items.filter((item) => item.id !== checked.id),
+    ]);
+    return checked;
+  }
+
+  function completeMobileMoneyPayment(payment) {
+    setCart([]);
+    setNotice(
+      `Payment successful${payment?.bill_id ? ` for ${payment.bill_id}` : ""}.`,
+    );
   }
 
   async function findBill(billId) {
@@ -492,40 +549,6 @@ function AppShell() {
     return result;
   }
 
-  async function saveLedger(event) {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const entry = {
-      id: `LG-${Date.now().toString().slice(-3)}`,
-      type: incomeType,
-      description: form.get("description"),
-      amount: Number(form.get("amount")),
-      date: new Date().toLocaleDateString("en-GB", {
-        day: "2-digit",
-        month: "short",
-        year: "numeric",
-      }),
-    };
-    setLoading(true);
-    try {
-      if (auth?.token)
-        await request(`/admin/ledger/${incomeType.toLowerCase()}`, {
-          method: "POST",
-          body: JSON.stringify({
-            amount: entry.amount,
-            description: entry.description,
-          }),
-        });
-      setLedger((items) => [entry, ...items]);
-      setNotice(`${incomeType} recorded`);
-      event.currentTarget.reset();
-    } catch (error) {
-      setNotice(error.message);
-    } finally {
-      setLoading(false);
-    }
-  }
-
   async function saveProduct(event) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -534,6 +557,8 @@ function AppShell() {
       category: form.get("category"),
       description: form.get("description"),
       price: Number(form.get("price")),
+      cost_price:
+        form.get("cost_price") === "" ? null : Number(form.get("cost_price")),
       stock_quantity: Number(form.get("stock_quantity")),
       image_url: form.get("image_url"),
     };
@@ -652,6 +677,31 @@ function AppShell() {
       setNotice(error.message);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function updateJobPriority(jobName, priority) {
+    try {
+      const updated = await request(
+        `/admin/jobs/${encodeURIComponent(jobName)}/priority`,
+        { method: "PATCH", body: JSON.stringify({ priority }) },
+      );
+      setJobs((items) =>
+        items.map((job) => (job.job_name === jobName ? updated : job)),
+      );
+      setReportData((data) =>
+        data
+          ? {
+              ...data,
+              jobs: (data.jobs || []).map((job) =>
+                job.job_name === jobName ? updated : job,
+              ),
+            }
+          : data,
+      );
+      setNotice(`${jobName} priority set to ${priority}`);
+    } catch (error) {
+      setNotice(error.message);
     }
   }
 
@@ -874,33 +924,39 @@ function AppShell() {
         authenticate={authenticate}
         loading={loading}
         onForgot={async (email) => {
+          setLoading(true);
           try {
             const result = await request("/auth/forgot-password", {
               method: "POST",
               body: JSON.stringify({ email }),
             });
             setNotice(
-              result.development_reset_token
-                ? `Development reset token: ${result.development_reset_token}`
-                : result.message || "Check your email for a reset link",
+              result.development_reset_code
+                ? `Development reset code: ${result.development_reset_code}`
+                : result.message || "Check your email for a reset code",
             );
             return result;
           } catch (error) {
             setNotice(error.message);
             return null;
+          } finally {
+            setLoading(false);
           }
         }}
-        onReset={async (token, password) => {
+        onReset={async (email, code, password) => {
+          setLoading(true);
           try {
             const result = await request("/auth/reset-password", {
               method: "POST",
-              body: JSON.stringify({ token, password }),
+              body: JSON.stringify({ email, code, password }),
             });
             setNotice(result.message);
             return true;
           } catch (error) {
             setNotice(error.message);
             return false;
+          } finally {
+            setLoading(false);
           }
         }}
       />
@@ -935,6 +991,7 @@ function AppShell() {
         setActiveModal("part-payment");
       }}
       reviewDebt={reviewDebt}
+      onUpdateJobPriority={updateJobPriority}
     />
   );
 
@@ -955,6 +1012,9 @@ function AppShell() {
       debtDays={debtDays}
       setDebtDays={setDebtDays}
       checkout={checkout}
+      startMobileMoneyCheckout={startMobileMoneyCheckout}
+      checkMobileMoneyStatus={checkMobileMoneyStatus}
+      completeMobileMoneyPayment={completeMobileMoneyPayment}
       loading={loading}
       debts={filteredDebts}
       returns={filteredReturns}
@@ -968,7 +1028,7 @@ function AppShell() {
 
   if (authChecking) {
     return (
-      <main className="grid min-h-screen place-items-center bg-stone-100" aria-label="Checking account permissions">
+      <main className="grid min-h-screen place-items-center bg-stone-100 dark:bg-stone-950" aria-label="Checking account permissions">
         <Spinner />
       </main>
     );
@@ -979,6 +1039,8 @@ function AppShell() {
     return (
       <>
         <LandingPage
+          theme={theme}
+          onToggleTheme={() => setTheme((value) => value === "dark" ? "light" : "dark")}
           onClientSignIn={() => {
             setRole("client");
             setAuthMode("login");
@@ -1014,7 +1076,7 @@ function AppShell() {
     return <Navigate to={roleRoutes[role === "admin" ? "Overview" : "Shop"]} replace />;
 
   return (
-    <div className="min-h-screen bg-stone-100 text-stone-900 lg:grid lg:grid-cols-[248px_minmax(0,1fr)]">
+    <div className="min-h-screen bg-stone-100 text-stone-900 dark:bg-stone-950 dark:text-stone-100 lg:grid lg:grid-cols-[248px_minmax(0,1fr)]">
       <aside className={`fixed inset-y-0 left-0 z-30 flex h-screen w-65 flex-col bg-emerald-950 p-5 text-emerald-50 shadow-2xl transition-transform lg:sticky lg:top-0 lg:z-20 lg:w-auto lg:shadow-none ${mobileNav ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}`}>
         <NavLink
           className="flex items-center gap-3 text-lg font-bold leading-tight text-white no-underline"
@@ -1035,6 +1097,7 @@ function AppShell() {
               to={(role === "admin" ? adminRoutes : clientRoutes)[label]}
               className={({ isActive }) => `flex min-h-11 items-center gap-3 rounded-md px-3 text-sm transition ${isActive ? "bg-lime-100 font-semibold text-emerald-950" : "text-emerald-100/80 hover:bg-white/10 hover:text-white"}`}
               key={label}
+              end
               onClick={() => setMobileNav(false)}
             >
               <Icon size={18} strokeWidth={1.8} />
@@ -1098,24 +1161,24 @@ function AppShell() {
         />
       )}
       <main className="flex min-h-screen min-w-0 flex-col">
-        <header className="sticky top-0 z-10 flex min-h-17 items-center gap-3 border-b border-stone-200 bg-white/95 px-3 backdrop-blur sm:justify-between sm:px-6 lg:px-9">
+        <header className="sticky top-0 z-10 flex min-h-17 items-center gap-3 border-b border-stone-200 bg-white/95 px-3 backdrop-blur dark:border-stone-800 dark:bg-stone-900/95 sm:justify-between sm:px-6 lg:px-9">
           <button
-            className="grid size-9 shrink-0 place-items-center rounded text-stone-600 hover:bg-stone-100 lg:hidden"
+            className="grid size-9 shrink-0 place-items-center rounded text-stone-600 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800 lg:hidden"
             title="Open navigation"
             onClick={() => setMobileNav(true)}
           >
             <Menu size={20} />
           </button>
-          <div className="flex items-center gap-2 text-xs text-stone-500">
+          <div className="flex items-center gap-2 text-xs text-stone-500 dark:text-stone-400">
             <span className="hidden sm:inline">Workspace</span>
-            <span className="hidden text-stone-300 sm:inline">/</span>
-            <b className="text-stone-900">{page}</b>
+            <span className="hidden text-stone-300 dark:text-stone-600 sm:inline">/</span>
+            <b className="text-stone-900 dark:text-stone-100">{page}</b>
           </div>
           <div className="ml-auto flex min-w-0 items-center gap-1.5 sm:gap-3">
-            <label className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-md border border-stone-200 bg-stone-50 px-2.5 text-stone-500 sm:w-64 sm:flex-none">
+            <label className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-md border border-stone-200 bg-stone-50 px-2.5 text-stone-500 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-300 sm:w-64 sm:flex-none">
               <Search className="shrink-0" size={16} />
               <input
-                className="w-full min-w-0 bg-transparent text-xs text-stone-900 outline-none placeholder:text-stone-400"
+                className="w-full min-w-0 bg-transparent text-xs text-stone-900 outline-none placeholder:text-stone-400 dark:text-stone-100 dark:placeholder:text-stone-500"
                 aria-label="Search"
                 placeholder={
                   role === "admin"
@@ -1125,10 +1188,18 @@ function AppShell() {
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
               />
-              <kbd className="hidden whitespace-nowrap rounded border border-stone-200 bg-white px-1 text-[10px] text-stone-500 md:inline">⌘ K</kbd>
+              <kbd className="hidden whitespace-nowrap rounded border border-stone-200 bg-white px-1 text-[10px] text-stone-500 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-400 md:inline">⌘ K</kbd>
             </label>
             <button
-              className="relative grid size-9 shrink-0 place-items-center rounded text-stone-600 hover:bg-stone-100"
+              className="grid size-9 shrink-0 place-items-center rounded text-stone-600 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800"
+              title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+              aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+              onClick={() => setTheme((value) => value === "dark" ? "light" : "dark")}
+            >
+              {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+            </button>
+            <button
+              className="relative grid size-9 shrink-0 place-items-center rounded text-stone-600 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800"
               title="Notifications"
               onClick={async () => {
                 if (role === "admin") {
@@ -1183,26 +1254,26 @@ function AppShell() {
         <div className="mx-auto w-full max-w-375 flex-1 px-3 py-6 sm:px-5 lg:px-9 lg:py-8">
           <div className="mb-6 flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-end">
             <div>
-              <div className="mb-2 text-[10px] font-bold text-stone-500">
-                {new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })} <span className="px-1 text-stone-300">·</span>{" "}
+              <div className="mb-2 text-[10px] font-bold text-stone-500 dark:text-stone-400">
+                {new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })} <span className="px-1 text-stone-300 dark:text-stone-600">·</span>{" "}
                 {role === "admin" ? "STORE OVERVIEW" : "YOUR LITTLE CORNER"}
               </div>
-              <h1 className="mb-2 text-3xl font-semibold leading-tight text-stone-950 sm:text-4xl">
+              <h1 className="mb-2 text-3xl font-semibold leading-tight text-stone-950 dark:text-stone-50 sm:text-4xl">
                 {page === "Overview" ? (
                   <>
                     A lovely day to
-                    <br className="hidden sm:block" /> make things <em className="font-serif font-medium text-emerald-800">happen.</em>
+                    <br className="hidden sm:block" /> make things <em className="font-serif font-medium text-emerald-800 dark:text-lime-300">happen.</em>
                   </>
                 ) : page === "Shop" ? (
                   <>
                     A little something
-                    <br className="hidden sm:block" /> for <em className="font-serif font-medium text-emerald-800">every day.</em>
+                    <br className="hidden sm:block" /> for <em className="font-serif font-medium text-emerald-800 dark:text-lime-300">every day.</em>
                   </>
                 ) : (
                   pageTitle
                 )}
               </h1>
-              <p className="max-w-2xl text-sm leading-6 text-stone-600">
+              <p className="max-w-2xl text-sm leading-6 text-stone-600 dark:text-stone-400">
                 {page === "Overview"
                   ? "Here’s what’s happening with your shop today."
                   : page === "Shop"
@@ -1213,17 +1284,21 @@ function AppShell() {
               </p>
             </div>
             <div className="flex w-full gap-2 sm:w-auto">
-              <button className="inline-flex min-h-10 flex-1 items-center justify-center gap-2 rounded border border-stone-200 bg-white px-3 text-sm font-medium text-stone-700 hover:bg-stone-50 sm:flex-none" onClick={exportReport}>
+              <button className="inline-flex min-h-10 flex-1 items-center justify-center gap-2 rounded border border-stone-200 bg-white px-3 text-sm font-medium text-stone-700 hover:bg-stone-50 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200 dark:hover:bg-stone-800 sm:flex-none" onClick={exportReport}>
                 <Download size={16} /> Export
               </button>
               <button
                 className="inline-flex min-h-10 flex-1 items-center justify-center gap-2 rounded bg-emerald-800 px-4 text-sm font-semibold text-white hover:bg-emerald-900 sm:flex-none"
                 onClick={() =>
-                  role === "admin" ? setActiveModal("record") : setPage("Shop")
+                  role === "admin" ? setPage("Reports") : setPage("Shop")
                 }
               >
-                <Plus size={17} />{" "}
-                {role === "admin" ? "New record" : "Browse shop"}
+                {role === "admin" ? (
+                  <FileChartColumnIncreasing size={17} />
+                ) : (
+                  <Plus size={17} />
+                )}
+                {role === "admin" ? "View reports" : "Browse shop"}
               </button>
             </div>
           </div>
@@ -1268,53 +1343,6 @@ function AppShell() {
         </div>
       </main>
 
-      {activeModal === "record" && (
-        <Modal title="Record a transaction" onClose={() => setActiveModal("")}>
-          <form
-            className={formLayout}
-            onSubmit={(event) => {
-              saveLedger(event);
-              setActiveModal("");
-            }}
-          >
-            <label className={formLabel}>
-              Type
-              <select
-                className={formControl}
-                value={incomeType}
-                onChange={(event) => setIncomeType(event.target.value)}
-              >
-                <option>Income</option>
-                <option>Outcome</option>
-              </select>
-            </label>
-            <label className={formLabel}>
-              Amount
-              <input
-                name="amount"
-                className={formControl}
-                type="number"
-                min="1"
-                placeholder="0"
-                required
-              />
-            </label>
-            <label className={formLabel}>
-              Description
-              <input
-                className={formControl}
-                name="description"
-                placeholder="What was this for?"
-                required
-              />
-            </label>
-            <button className={primaryButton} disabled={loading}>
-              {loading ? <Spinner /> : <Plus size={16} />} Save{" "}
-              {incomeType.toLowerCase()}
-            </button>
-          </form>
-        </Modal>
-      )}
       {activeModal === "product" && (
         <Modal title="Add a product" onClose={() => setActiveModal("")}>
           <form className={formLayout} onSubmit={saveProduct}>
@@ -1338,10 +1366,20 @@ function AppShell() {
                 <input className={formControl} name="stock_quantity" type="number" min="0" required />
               </label>
               <label className={formLabel}>
-                Product photo
-                <input className="block w-full text-sm text-stone-600 file:mr-3 file:rounded file:border-0 file:bg-emerald-50 file:px-3 file:py-2 file:text-xs file:font-semibold file:text-emerald-800 hover:file:bg-emerald-100" name="image" type="file" accept="image/*" />
+                Cost price (RWF)
+                <input
+                  className={formControl}
+                  name="cost_price"
+                  type="number"
+                  min="0"
+                  placeholder="Used for profit reports"
+                />
               </label>
             </div>
+            <label className={formLabel}>
+              Product photo
+              <input className="block w-full text-sm text-stone-600 file:mr-3 file:rounded file:border-0 file:bg-emerald-50 file:px-3 file:py-2 file:text-xs file:font-semibold file:text-emerald-800 hover:file:bg-emerald-100 dark:text-stone-400 dark:file:bg-emerald-950 dark:file:text-emerald-200" name="image" type="file" accept="image/*" />
+            </label>
             <label className={formLabel}>
               Or image URL
               <input className={formControl} name="image_url" type="url" />
@@ -1362,7 +1400,7 @@ function AppShell() {
           onClose={() => setActiveModal("")}
         >
           <form className={formLayout} onSubmit={savePartPayment}>
-            <p className="text-sm text-stone-600">
+            <p className="text-sm text-stone-600 dark:text-stone-400">
               Remaining balance: {money(selectedDebt.balance)}
             </p>
             <label className={formLabel}>
@@ -1390,14 +1428,14 @@ function AppShell() {
         >
           <div className="grid gap-2">
             {adminNotifications.map((notification) => (
-              <article className={`rounded border p-3 ${notification.read_at ? "border-stone-200 bg-white" : "border-emerald-200 bg-emerald-50"}`} key={notification._id}>
-                <p className="mb-2 text-sm text-stone-800">{notification.message}</p>
-                <small className="block text-xs text-stone-500">
+              <article className={`rounded border p-3 ${notification.read_at ? "border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-900" : "border-emerald-200 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950"}`} key={notification._id}>
+                <p className="mb-2 text-sm text-stone-800 dark:text-stone-200">{notification.message}</p>
+                <small className="block text-xs text-stone-500 dark:text-stone-400">
                   {new Date(notification.createdAt).toLocaleString()}
                 </small>
                 {!notification.read_at && (
                   <button
-                    className="mt-2 text-xs font-semibold text-emerald-800 hover:underline"
+                    className="mt-2 text-xs font-semibold text-emerald-800 hover:underline dark:text-emerald-300"
                     onClick={() => markNotificationRead(notification)}
                   >
                     Mark read
@@ -1406,14 +1444,14 @@ function AppShell() {
               </article>
             ))}
             {adminNotifications.length === 0 && (
-              <p className="text-sm text-stone-600">No payment notifications yet.</p>
+              <p className="text-sm text-stone-600 dark:text-stone-400">No payment notifications yet.</p>
             )}
           </div>
         </Modal>
       )}
       {authDialog}
 
-      <footer className="flex flex-col gap-2 border-t border-stone-200 px-3 py-4 text-xs text-stone-500 sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-9">
+      <footer className="flex flex-col gap-2 border-t border-stone-200 px-3 py-4 text-xs text-stone-500 dark:border-stone-800 dark:text-stone-400 sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-9">
         <span>
           goodthings market <b>·</b> A little better, every day.
         </span>

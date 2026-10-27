@@ -6,6 +6,7 @@ import {
   ReturnList,
   Spinner,
   StatusPill,
+  MobileMoneyDialog,
 } from "../../components/shared.jsx";
 import { money } from "../../data/demoData.js";
 import { activeReturns } from "../../utils/returns.js";
@@ -37,6 +38,9 @@ export function ClientView({
   debtDays,
   setDebtDays,
   checkout,
+  startMobileMoneyCheckout,
+  checkMobileMoneyStatus,
+  completeMobileMoneyPayment,
   loading,
   debts,
   returns,
@@ -47,6 +51,7 @@ export function ClientView({
   payBill,
 }) {
   const [category, setCategory] = useState("Everything");
+  const [mobilePaymentOpen, setMobilePaymentOpen] = useState(false);
   const [returnProduct, setReturnProduct] = useState("");
   const [returnReason, setReturnReason] = useState("");
   const [returnQuantity, setReturnQuantity] = useState("1");
@@ -76,8 +81,8 @@ export function ClientView({
           title="Your purchases"
           subtitle="A little history of the good things you’ve found."
         />
-        <section className="rounded-md border border-stone-200 bg-white p-4 sm:p-5" aria-labelledby="bill-lookup-title">
-          <h3 className="mb-3 text-base font-semibold text-stone-900" id="bill-lookup-title">Find my bill</h3>
+        <section className="rounded-md border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 p-4 sm:p-5" aria-labelledby="bill-lookup-title">
+          <h3 className="mb-3 text-base font-semibold text-stone-900 dark:text-stone-100" id="bill-lookup-title">Find my bill</h3>
           <form
             className="flex flex-col gap-2 sm:flex-row"
             onSubmit={async (event) => {
@@ -95,40 +100,40 @@ export function ClientView({
             }}
           >
             <input
-              className="min-h-10 min-w-0 flex-1 rounded border border-stone-300 px-3 text-sm uppercase outline-none focus:border-emerald-700 focus:ring-2 focus:ring-emerald-700/20"
+              className="min-h-10 min-w-0 flex-1 rounded border border-stone-300 bg-white px-3 text-sm text-stone-900 uppercase outline-none focus:border-emerald-700 focus:ring-2 focus:ring-emerald-700/20 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-100"
               value={billId}
               onChange={(event) => setBillId(event.target.value.toUpperCase())}
               placeholder="TXN-20261020-4821"
               aria-label="Bill ID"
               required
             />
-            <button className="inline-flex min-h-10 items-center justify-center gap-2 rounded border border-stone-200 bg-white px-4 text-sm font-medium text-stone-700 hover:bg-stone-50 disabled:opacity-50" disabled={billLoading}>
+            <button className="inline-flex min-h-10 items-center justify-center gap-2 rounded border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 px-4 text-sm font-medium text-stone-700 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-800 disabled:opacity-50" disabled={billLoading}>
               {billLoading ? <Spinner /> : "Find bill"}
             </button>
           </form>
-          {billError && <p className="mt-3 text-sm text-rose-700" role="alert">{billError}</p>}
+          {billError && <p className="mt-3 text-sm text-rose-700 dark:text-rose-300" role="alert">{billError}</p>}
           {billResult && (
-            <div className="mt-4 rounded border border-emerald-200 bg-emerald-50 p-4" role="status">
+            <div className="mt-4 rounded border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950 p-4" role="status">
               <div className="flex flex-wrap items-center gap-3">
-                <b className="font-mono text-sm text-stone-900">{billResult.bill_id}</b>
-                <span className="font-semibold text-stone-900">{money(billResult.amount)}</span>
+                <b className="font-mono text-sm text-stone-900 dark:text-stone-100">{billResult.bill_id}</b>
+                <span className="font-semibold text-stone-900 dark:text-stone-100">{money(billResult.amount)}</span>
                 <StatusPill status={billResult.status} />
               </div>
-              <p className="mt-2 text-xs text-stone-600">
+              <p className="mt-2 text-xs text-stone-600 dark:text-stone-400">
                 Expires {new Date(billResult.expires_at).toLocaleString()}
               </p>
               {billResult.momo_requested_at && billResult.status === "Pending" && (
-                <p className="mt-2 text-sm font-medium text-emerald-800">
+                <p className="mt-2 text-sm font-medium text-emerald-800 dark:text-emerald-300">
                   Payment request sent. Confirm it on your phone.
                 </p>
               )}
               {billResult.status === "Pending" &&
                 billResult.method === "Mobile Money" && (
                   <div className="mt-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
-                    <label className="grid gap-1.5 text-sm font-medium text-stone-700">
+                    <label className="grid gap-1.5 text-sm font-medium text-stone-700 dark:text-stone-300">
                       Mobile money number
                       <input
-                        className="min-h-10 rounded border border-stone-300 bg-white px-3 text-sm outline-none focus:border-emerald-700 focus:ring-2 focus:ring-emerald-700/20"
+                        className="min-h-10 rounded border border-stone-300 bg-white px-3 text-sm text-stone-900 outline-none focus:border-emerald-700 focus:ring-2 focus:ring-emerald-700/20 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-100"
                         type="tel"
                         inputMode="tel"
                         autoComplete="tel"
@@ -164,7 +169,7 @@ export function ClientView({
             </div>
           )}
         </section>
-        <div className="overflow-hidden rounded-md border border-stone-200 bg-white">
+        <div className="overflow-hidden rounded-md border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900">
           <PaymentsTable
             payments={payments.map((payment) => ({
               ...payment,
@@ -195,9 +200,9 @@ export function ClientView({
           title="Purchase returns"
           subtitle="Something not quite right? We’ll help put it right."
         />
-        <div className="max-w-xl rounded-md border border-stone-200 bg-white p-4 sm:p-5">
-          <h3 className="text-base font-semibold text-stone-900">Start a return</h3>
-          <p className="mt-1 text-sm text-stone-600">Choose a purchased item and tell us a little about it.</p>
+        <div className="max-w-xl rounded-md border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 p-4 sm:p-5">
+          <h3 className="text-base font-semibold text-stone-900 dark:text-stone-100">Start a return</h3>
+          <p className="mt-1 text-sm text-stone-600 dark:text-stone-400">Choose a purchased item and tell us a little about it.</p>
           <form
             className="mt-4 grid gap-4"
             onSubmit={(event) => {
@@ -214,10 +219,10 @@ export function ClientView({
               });
             }}
           >
-            <label className="grid gap-1.5 text-sm font-medium text-stone-700">
+            <label className="grid gap-1.5 text-sm font-medium text-stone-700 dark:text-stone-300">
               Purchased item
               <select
-                className="min-h-10 rounded border border-stone-300 bg-white px-3 text-sm outline-none focus:border-emerald-700 focus:ring-2 focus:ring-emerald-700/20"
+                className="min-h-10 rounded border border-stone-300 bg-white px-3 text-sm text-stone-900 outline-none focus:border-emerald-700 focus:ring-2 focus:ring-emerald-700/20 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-100"
                 required
                 value={returnProduct}
                 onChange={(event) => setReturnProduct(event.target.value)}
@@ -231,10 +236,10 @@ export function ClientView({
                 ))}
               </select>
             </label>
-            <label className="grid gap-1.5 text-sm font-medium text-stone-700">
+            <label className="grid gap-1.5 text-sm font-medium text-stone-700 dark:text-stone-300">
               Quantity
               <input
-                className="min-h-10 rounded border border-stone-300 px-3 text-sm outline-none focus:border-emerald-700 focus:ring-2 focus:ring-emerald-700/20"
+                className="min-h-10 rounded border border-stone-300 bg-white px-3 text-sm text-stone-900 outline-none focus:border-emerald-700 focus:ring-2 focus:ring-emerald-700/20 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-100"
                 type="number"
                 min="1"
                 max={
@@ -246,10 +251,10 @@ export function ClientView({
                 required
               />
             </label>
-            <label className="grid gap-1.5 text-sm font-medium text-stone-700">
+            <label className="grid gap-1.5 text-sm font-medium text-stone-700 dark:text-stone-300">
               Reason
               <textarea
-                className="min-h-24 rounded border border-stone-300 p-3 text-sm outline-none focus:border-emerald-700 focus:ring-2 focus:ring-emerald-700/20"
+                className="min-h-24 rounded border border-stone-300 bg-white p-3 text-sm text-stone-900 outline-none focus:border-emerald-700 focus:ring-2 focus:ring-emerald-700/20 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-100"
                 required
                 value={returnReason}
                 onChange={(event) => setReturnReason(event.target.value)}
@@ -262,33 +267,33 @@ export function ClientView({
           </form>
         </div>
         <div>
-          <h3 className="mb-2 text-base font-semibold text-stone-900">Previous requests</h3>
+          <h3 className="mb-2 text-base font-semibold text-stone-900 dark:text-stone-100">Previous requests</h3>
           <ReturnList returns={returns} client />
         </div>
       </section>
     );
   return (
     <>
-      <div className="mb-5 flex flex-col justify-between gap-4 rounded-md border border-emerald-100 bg-emerald-50 p-4 sm:flex-row sm:items-center sm:p-5">
+      <div className="mb-5 flex flex-col justify-between gap-4 rounded-md border border-emerald-100 dark:border-emerald-900 bg-emerald-50 dark:bg-emerald-950 p-4 sm:flex-row sm:items-center sm:p-5">
         <div>
-          <span className="text-[10px] font-bold text-emerald-800">A GOOD THING, EVERY DAY</span>
-          <h2 className="mb-2 mt-1 text-2xl font-semibold text-stone-900">
+          <span className="text-[10px] font-bold text-emerald-800 dark:text-emerald-300">A GOOD THING, EVERY DAY</span>
+          <h2 className="mb-2 mt-1 text-2xl font-semibold text-stone-900 dark:text-stone-100">
             Find your <em>favourite.</em>
           </h2>
-          <p className="max-w-xl text-sm leading-6 text-stone-600">
+          <p className="max-w-xl text-sm leading-6 text-stone-600 dark:text-stone-400">
             Useful little things, chosen with care and ready to come home with
             you.
           </p>
         </div>
-        <div className="flex items-center gap-3 rounded-md bg-white p-3 text-stone-700 shadow-sm">
-          <span className="grid size-9 place-items-center rounded bg-orange-50 text-orange-800">
+        <div className="flex items-center gap-3 rounded-md bg-white dark:bg-stone-900 p-3 text-stone-700 dark:text-stone-300 shadow-sm">
+          <span className="grid size-9 place-items-center rounded bg-orange-50 dark:bg-orange-950 text-orange-800 dark:text-orange-300">
             <Truck size={18} />
           </span>
           <span>
             <b className="block text-xs font-semibold">Ready when you are</b>
-            <small className="mt-1 block text-[10px] text-stone-500">Create a bill now and pay within 24 hours.</small>
+            <small className="mt-1 block text-[10px] text-stone-500 dark:text-stone-400">Create a bill now and pay within 24 hours.</small>
           </span>
-          <ArrowRight className="ml-2 text-stone-500" size={16} />
+          <ArrowRight className="ml-2 text-stone-500 dark:text-stone-400" size={16} />
         </div>
       </div>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -296,7 +301,7 @@ export function ClientView({
           {categories.map((item) => (
             <button
               key={item}
-              className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${category === item ? "border-emerald-800 bg-emerald-800 text-white" : "border-stone-200 bg-white text-stone-600 hover:border-emerald-700 hover:text-emerald-800"}`}
+              className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${category === item ? "border-emerald-800 bg-emerald-800 text-white" : "border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 text-stone-600 dark:text-stone-400 hover:border-emerald-700 hover:text-emerald-800"}`}
               onClick={() => setCategory(item)}
             >
               {item}
@@ -304,7 +309,7 @@ export function ClientView({
           ))}
         </div>
         <button
-          className="inline-flex min-h-9 items-center gap-2 rounded border border-stone-200 bg-white px-3 text-sm font-medium text-stone-700 hover:bg-stone-50 lg:hidden"
+          className="inline-flex min-h-9 items-center gap-2 rounded border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 px-3 text-sm font-medium text-stone-700 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-800 lg:hidden"
           onClick={() =>
             document
               .getElementById("checkout-panel")
@@ -319,15 +324,15 @@ export function ClientView({
         <div>
           <div className="grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-3">
             {visible.map((product) => (
-              <article className="min-w-0 rounded-md border border-stone-200 bg-white p-2">
-                <div className="relative aspect-square overflow-hidden rounded bg-stone-100">
+              <article className="min-w-0 rounded-md border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 p-2">
+                <div className="relative aspect-square overflow-hidden rounded bg-stone-100 dark:bg-stone-800">
                   <img
                     className="size-full object-cover"
                     src={product.image_url}
                     alt={product.name}
                     loading="lazy"
                   />
-                  <span className="absolute left-1.5 top-1.5 rounded bg-white/95 px-1.5 py-1 text-[9px] font-medium text-stone-700 sm:left-2 sm:top-2 sm:px-2 sm:text-[10px]">{product.category}</span>
+                  <span className="absolute left-1.5 top-1.5 rounded bg-white/95 dark:bg-stone-900/95 px-1.5 py-1 text-[9px] font-medium text-stone-700 dark:text-stone-300 sm:left-2 sm:top-2 sm:px-2 sm:text-[10px]">{product.category}</span>
                   <button
                     className="absolute bottom-1.5 right-1.5 grid size-8 place-items-center rounded-full bg-emerald-800 text-white shadow hover:bg-emerald-900 sm:bottom-2 sm:right-2"
                     title={`Add ${product.name} to cart`}
@@ -338,12 +343,12 @@ export function ClientView({
                 </div>
                 <div className="flex min-w-0 items-start justify-between gap-2 py-2.5">
                   <div className="min-w-0">
-                    <h3 className="truncate text-xs font-semibold text-stone-900 sm:text-sm">{product.name}</h3>
-                    <p className="mt-1 line-clamp-2 text-[10px] leading-4 text-stone-500 sm:text-xs">{product.description}</p>
+                    <h3 className="truncate text-xs font-semibold text-stone-900 dark:text-stone-100 sm:text-sm">{product.name}</h3>
+                    <p className="mt-1 line-clamp-2 text-[10px] leading-4 text-stone-500 dark:text-stone-400 sm:text-xs">{product.description}</p>
                   </div>
-                  <b className="shrink-0 text-[10px] font-semibold text-stone-900 sm:text-xs">{money(product.price)}</b>
+                  <b className="shrink-0 text-[10px] font-semibold text-stone-900 dark:text-stone-100 sm:text-xs">{money(product.price)}</b>
                 </div>
-                <div className="border-t border-stone-100 pt-2 text-[10px] text-stone-500 sm:text-xs">
+                <div className="border-t border-stone-100 dark:border-stone-800 pt-2 text-[10px] text-stone-500 dark:text-stone-400 sm:text-xs">
                   {product.stock_quantity} in stock <span>·</span> Ships in 1–2
                   days
                 </div>
@@ -351,33 +356,33 @@ export function ClientView({
             ))}
           </div>
         </div>
-        <aside className="rounded-md border border-stone-200 bg-white p-4 xl:sticky xl:top-21" id="checkout-panel">
+        <aside className="rounded-md border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 p-4 xl:sticky xl:top-21" id="checkout-panel">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <span className="text-[10px] font-bold text-stone-500">YOUR BAG</span>
-              <h3 className="mt-1 text-base font-semibold text-stone-900">Ready when you are.</h3>
+              <span className="text-[10px] font-bold text-stone-500 dark:text-stone-400">YOUR BAG</span>
+              <h3 className="mt-1 text-base font-semibold text-stone-900 dark:text-stone-100">Ready when you are.</h3>
             </div>
-            <span className="grid size-8 place-items-center rounded-full bg-emerald-50 text-sm font-semibold text-emerald-900">{cartCount}</span>
+            <span className="grid size-8 place-items-center rounded-full bg-emerald-50 dark:bg-emerald-950 text-sm font-semibold text-emerald-900 dark:text-emerald-200">{cartCount}</span>
           </div>
           {cart.length === 0 ? (
             <div className="grid justify-items-center gap-2 py-10 text-center">
-              <span className="grid size-11 place-items-center rounded-full bg-stone-100 text-stone-600">
+              <span className="grid size-11 place-items-center rounded-full bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-400">
                 <ShoppingBag size={21} />
               </span>
-              <b className="text-sm font-semibold text-stone-800">A little room for something good.</b>
-              <p className="text-xs text-stone-500">Your chosen things will show up here.</p>
+              <b className="text-sm font-semibold text-stone-800 dark:text-stone-200">A little room for something good.</b>
+              <p className="text-xs text-stone-500 dark:text-stone-400">Your chosen things will show up here.</p>
             </div>
           ) : (
-            <div className="my-3 grid divide-y divide-stone-100">
+            <div className="my-3 grid divide-y divide-stone-100 dark:divide-stone-800">
               {cart.map((item) => (
                 <div className="flex items-start gap-2.5 py-3" key={item.id}>
                   <img className="size-12 rounded object-cover" src={item.image_url} alt="" />
                   <div className="min-w-0 flex-1">
-                    <b className="block truncate text-xs font-semibold text-stone-800">{item.name}</b>
-                    <span className="mt-1 block text-xs text-stone-500">{money(item.price)}</span>
-                    <div className="mt-2 inline-flex items-center gap-2 rounded border border-stone-200">
+                    <b className="block truncate text-xs font-semibold text-stone-800 dark:text-stone-200">{item.name}</b>
+                    <span className="mt-1 block text-xs text-stone-500 dark:text-stone-400">{money(item.price)}</span>
+                    <div className="mt-2 inline-flex items-center gap-2 rounded border border-stone-200 dark:border-stone-800">
                       <button
-                        className="grid size-7 place-items-center text-stone-600 hover:bg-stone-100"
+                        className="grid size-7 place-items-center text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800"
                         aria-label="Decrease quantity"
                         onClick={() => updateQuantity(item.id, -1)}
                       >
@@ -385,7 +390,7 @@ export function ClientView({
                       </button>
                       <span className="text-xs font-medium">{item.quantity}</span>
                       <button
-                        className="grid size-7 place-items-center text-stone-600 hover:bg-stone-100"
+                        className="grid size-7 place-items-center text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800"
                         aria-label="Increase quantity"
                         onClick={() => updateQuantity(item.id, 1)}
                       >
@@ -393,26 +398,26 @@ export function ClientView({
                       </button>
                     </div>
                   </div>
-                  <b className="pt-1 text-[11px] font-semibold text-stone-800">
+                  <b className="pt-1 text-[11px] font-semibold text-stone-800 dark:text-stone-200">
                     {money(item.price * item.quantity)}
                   </b>
                 </div>
               ))}
             </div>
           )}
-          <div className="flex items-center justify-between border-t border-stone-200 py-3 text-sm">
-            <span className="text-stone-600">Subtotal</span>
-            <b className="font-semibold text-stone-900">{money(cartTotal)}</b>
+          <div className="flex items-center justify-between border-t border-stone-200 dark:border-stone-800 py-3 text-sm">
+            <span className="text-stone-600 dark:text-stone-400">Subtotal</span>
+            <b className="font-semibold text-stone-900 dark:text-stone-100">{money(cartTotal)}</b>
           </div>
           <div className="grid gap-2">
-            <span className="text-[10px] font-bold text-stone-500">HOW WOULD YOU LIKE TO PAY?</span>
+            <span className="text-[10px] font-bold text-stone-500 dark:text-stone-400">HOW WOULD YOU LIKE TO PAY?</span>
             {[
               ["Mobile money", "Approve securely on your phone"],
               ["Cash", "Pay when you collect"],
               ["Debt", "Choose a payment date"],
             ].map(([method, description]) => (
               <label
-                className={`flex cursor-pointer items-center gap-2.5 rounded border p-2.5 transition ${paymentMethod === method ? "border-emerald-700 bg-emerald-50" : "border-stone-200 hover:bg-stone-50"}`}
+                className={`flex cursor-pointer items-center gap-2.5 rounded border p-2.5 transition ${paymentMethod === method ? "border-emerald-700 bg-emerald-50 dark:bg-emerald-950" : "border-stone-200 dark:border-stone-800 hover:bg-stone-50 dark:hover:bg-stone-800"}`}
                 key={method}
               >
                 <input
@@ -423,8 +428,8 @@ export function ClientView({
                   onChange={() => setPaymentMethod(method)}
                 />
                 <span className="min-w-0 flex-1">
-                  <b className="block text-xs font-semibold text-stone-800">{method}</b>
-                  <small className="mt-0.5 block text-[10px] text-stone-500">{description}</small>
+                  <b className="block text-xs font-semibold text-stone-800 dark:text-stone-200">{method}</b>
+                  <small className="mt-0.5 block text-[10px] text-stone-500 dark:text-stone-400">{description}</small>
                 </span>
                 {method === "Mobile money" ? (
                   <CreditCard size={16} />
@@ -436,10 +441,10 @@ export function ClientView({
               </label>
             ))}
             {paymentMethod === "Debt" && (
-              <label className="grid gap-1.5 text-xs font-medium text-stone-600">
+              <label className="grid gap-1.5 text-xs font-medium text-stone-600 dark:text-stone-400">
                 Pay within
                 <select
-                  className="min-h-9 rounded border border-stone-300 bg-white px-2 text-sm outline-none focus:border-emerald-700"
+                  className="min-h-9 rounded border border-stone-300 bg-white px-2 text-sm text-stone-900 outline-none focus:border-emerald-700 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-100"
                   value={debtDays}
                   onChange={(event) => setDebtDays(event.target.value)}
                 >
@@ -454,30 +459,45 @@ export function ClientView({
           <button
             className="mt-3 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded bg-emerald-800 px-4 text-sm font-semibold text-white hover:bg-emerald-900 disabled:opacity-50"
             disabled={!cart.length || loading}
-            onClick={checkout}
+            onClick={() =>
+              paymentMethod === "Mobile money"
+                ? setMobilePaymentOpen(true)
+                : checkout()
+            }
           >
             {loading ? (
               <Spinner />
             ) : paymentMethod === "Debt" ? (
               <CalendarDays size={16} />
-            ) : (
+            ) : paymentMethod === "Cash" ? (
               <ShieldCheck size={16} />
+            ) : (
+              <CreditCard size={16} />
             )}
             {paymentMethod === "Debt"
               ? "Create debt bill"
               : paymentMethod === "Cash"
                 ? "Create cash bill"
-                : `Create bill · ${money(cartTotal)}`}
+                : `Pay · ${money(cartTotal)}`}
           </button>
-          <div className="mt-2 flex items-center justify-center gap-1.5 text-[10px] text-stone-500">
+          <div className="mt-2 flex items-center justify-center gap-1.5 text-[10px] text-stone-500 dark:text-stone-400">
             <ShieldCheck size={13} /> Bill payments are secured by your mobile money provider.
           </div>
         </aside>
       </div>
       {activeReturns(returns) && (
-        <div className="mt-4 flex items-center gap-2 rounded border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
+        <div className="mt-4 flex items-center gap-2 rounded border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950 p-3 text-xs text-emerald-900 dark:text-emerald-200">
           <Check size={15} /> Your recent return request is being reviewed.
         </div>
+      )}
+      {mobilePaymentOpen && (
+        <MobileMoneyDialog
+          amount={cartTotal}
+          onClose={() => setMobilePaymentOpen(false)}
+          onStartPayment={startMobileMoneyCheckout}
+          onCheckStatus={checkMobileMoneyStatus}
+          onSuccess={completeMobileMoneyPayment}
+        />
       )}
     </>
   );

@@ -13,6 +13,8 @@ const asyncRoute = require("../utils/asyncRoute");
 const {
   applyPaymentResult,
   expirePendingBills,
+  normalizeRwandaPhone,
+  reconcileMobileMoneyPayment,
   requestMobileMoney,
 } = require("../services/payment.service");
 const { sendEmail, updateJob } = require("../services/email.service");
@@ -59,7 +61,8 @@ router.get(
   asyncRoute(async (req, res) => {
     res.json(
       await CartItem.find({ client_id: req.auth.sub, status: "in_cart" })
-        .populate("product_id")
+        .select("-unit_cost")
+        .populate({ path: "product_id", select: "-cost_price" })
         .lean(),
     );
   }),
@@ -72,7 +75,7 @@ router.post(
     const product = await Product.findOne({
       _id: req.body.product_id,
       status: "active",
-    });
+    }).select("+cost_price");
     if (!product)
       return res.status(404).json({ error: "Product is not available." });
     if (!Number.isInteger(quantity) || quantity < 1)
@@ -83,11 +86,17 @@ router.post(
       { client_id: req.auth.sub, product_id: product._id, status: "in_cart" },
       {
         $inc: { quantity },
-        $setOnInsert: { unit_price: product.price, added_at: new Date() },
+        $set: {
+          unit_price: product.price,
+          unit_cost: product.cost_price ?? null,
+        },
+        $setOnInsert: { added_at: new Date() },
       },
       { upsert: true, new: true, setDefaultsOnInsert: true },
     );
-    res.status(201).json(await item.populate("product_id"));
+    res
+      .status(201)
+      .json(await item.populate({ path: "product_id", select: "-cost_price" }));
   }),
 );
 
@@ -131,10 +140,16 @@ router.post(
       return res
         .status(400)
         .json({ error: "Choose mobile money, cash, or debt." });
+    const mobileNumber =
+      method === "mobile_money"
+        ? normalizeRwandaPhone(req.body.mobile_money_number)
+        : undefined;
     const items = await CartItem.find({
       client_id: req.auth.sub,
       status: "in_cart",
-    }).populate("product_id");
+    })
+      .select("-unit_cost")
+      .populate({ path: "product_id", select: "+cost_price" });
     if (!items.length)
       return res.status(400).json({ error: "Your cart is empty." });
     const periodDays = Number(req.body.period_days || 30);
@@ -167,10 +182,16 @@ router.post(
       bill_id: billId,
       expires_at: expiresAt,
       due_date: dueDate,
+      mobile_money_number: mobileNumber,
     });
     const reservedItems = [];
     try {
       for (const item of items) {
+        item.unit_cost = item.product_id.cost_price ?? null;
+        await CartItem.updateOne(
+          { _id: item._id },
+          { unit_cost: item.unit_cost },
+        );
         const update = await Product.updateOne(
           { _id: item.product_id._id, stock_quantity: { $gte: item.quantity } },
           { $inc: { stock_quantity: -item.quantity } },
@@ -215,14 +236,27 @@ router.post(
         message: `Debt bill ${billId} created. It expires in 24 hours and awaits admin review.`,
       });
     }
+
+    if (method === "mobile_money") {
+      payment.momo_requested_at = new Date();
+      await payment.save();
+      try {
+        await requestMobileMoney(payment, mobileNumber);
+      } catch (error) {
+        await applyPaymentResult(payment, false, error.message);
+        throw error;
+      }
+      return res.status(201).json({
+        payment,
+        message: `Approve bill ${billId} on your phone.`,
+      });
+    }
+
     const client = await Client.findById(req.auth.sub);
     if (client) emailBill(client, payment);
     res.status(201).json({
       payment,
-      message:
-        method === "cash"
-          ? `Cash bill ${billId} created. Pay when collecting; it expires in 24 hours.`
-          : `Bill ${billId} created. Pay it any time within 24 hours.`,
+      message: `Cash bill ${billId} created. Pay when collecting; it expires in 24 hours.`,
     });
   }),
 );
@@ -262,10 +296,45 @@ router.get(
   }),
 );
 
+router.get(
+  "/bills/:billId/status",
+  asyncRoute(async (req, res) => {
+    const billId = req.params.billId.trim().toUpperCase();
+    let payment = await Payment.findOne({
+      client_id: req.auth.sub,
+      bill_id: billId,
+    });
+    if (!payment) return res.status(404).json({ error: "Bill not found." });
+    if (payment.expires_at && payment.expires_at <= new Date()) {
+      await expirePendingBills();
+      payment = await Payment.findById(payment._id);
+      return res.json(payment);
+    }
+    if (
+      payment.status === "pending" &&
+      payment.method === "mobile_money" &&
+      payment.momo_requested_at
+    ) {
+      try {
+        const reconciled = await reconcileMobileMoneyPayment(payment);
+        return res.json(reconciled || payment);
+      } catch (error) {
+        const current = await Payment.findById(payment._id).lean();
+        return res.json({
+          ...current,
+          verification_error: error.message,
+        });
+      }
+    }
+    res.json(payment);
+  }),
+);
+
 router.post(
   "/bills/:billId/pay",
   asyncRoute(async (req, res) => {
     const billId = req.params.billId.trim().toUpperCase();
+    const mobileNumber = normalizeRwandaPhone(req.body.mobile_money_number);
     const payment = await Payment.findOne({
       client_id: req.auth.sub,
       bill_id: billId,
@@ -282,8 +351,8 @@ router.post(
     if (payment.momo_requested_at)
       return res.status(409).json({ error: "Payment request already sent. Check your phone." });
 
-    const mobileNumber = String(req.body.mobile_money_number || "").trim();
     payment.momo_requested_at = new Date();
+    payment.mobile_money_number = mobileNumber;
     await payment.save();
     try {
       const momo = await requestMobileMoney(payment, mobileNumber);
@@ -293,10 +362,7 @@ router.post(
         message: `Approve bill ${payment.bill_id} on your phone.`,
       });
     } catch (error) {
-      await Payment.updateOne(
-        { _id: payment._id, status: "pending" },
-        { $unset: { momo_requested_at: 1 } },
-      );
+      await applyPaymentResult(payment, false, error.message);
       throw error;
     }
   }),
@@ -381,7 +447,7 @@ router.post(
       _id: req.body.cart_item_id,
       client_id: req.auth.sub,
       status: { $in: ["paid", "debt"] },
-    }).populate("product_id");
+    }).populate({ path: "product_id", select: "+cost_price" });
     if (!item)
       return res
         .status(404)

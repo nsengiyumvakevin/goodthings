@@ -150,6 +150,128 @@ router.get(
         .populate("client_id", "first_name last_name")
         .sort({ created_at: -1 })
         .lean();
+    if (type === "all" || type === "products")
+      report.product_profit = await Payment.aggregate([
+        {
+          $match: {
+            createdAt: dateFilter,
+            status: { $in: ["paid", "unpaid", "partial", "overdue"] },
+          },
+        },
+        {
+          $lookup: {
+            from: "cart_items",
+            localField: "_id",
+            foreignField: "payment_id",
+            as: "items",
+          },
+        },
+        { $unwind: "$items" },
+        { $match: { "items.status": { $in: ["paid", "debt"] } } },
+        {
+          $group: {
+            _id: "$items.product_id",
+            quantity: { $sum: "$items.quantity" },
+            revenue: {
+              $sum: { $multiply: ["$items.quantity", "$items.unit_price"] },
+            },
+            cost: {
+              $sum: {
+                $cond: [
+                  { $eq: [{ $ifNull: ["$items.unit_cost", null] }, null] },
+                  0,
+                  { $multiply: ["$items.quantity", "$items.unit_cost"] },
+                ],
+              },
+            },
+            missing_cost_quantity: {
+              $sum: {
+                $cond: [
+                  { $eq: [{ $ifNull: ["$items.unit_cost", null] }, null] },
+                  "$items.quantity",
+                  0,
+                ],
+              },
+            },
+          },
+        },
+        {
+          $lookup: {
+            from: "products",
+            localField: "_id",
+            foreignField: "_id",
+            as: "product",
+          },
+        },
+        { $unwind: { path: "$product", preserveNullAndEmptyArrays: true } },
+        {
+          $project: {
+            product_id: "$_id",
+            name: { $ifNull: ["$product.name", "Removed product"] },
+            category: { $ifNull: ["$product.category", "—"] },
+            quantity: 1,
+            revenue: 1,
+            cost: 1,
+            missing_cost_quantity: 1,
+            profit: {
+              $cond: [
+                { $gt: ["$missing_cost_quantity", 0] },
+                null,
+                { $subtract: ["$revenue", "$cost"] },
+              ],
+            },
+          },
+        },
+        { $sort: { revenue: -1 } },
+      ]);
+    if (["all", "income", "outcome", "daily"].includes(type)) {
+      const timezone = process.env.REPORT_TIMEZONE || "Africa/Kigali";
+      const dayExpression = {
+        $dateToString: { format: "%Y-%m-%d", date: "$date", timezone },
+      };
+      const [incomeByDay, outcomeByDay] = await Promise.all([
+        Income.aggregate([
+          { $match: { date: dateFilter } },
+          {
+            $group: {
+              _id: dayExpression,
+              amount: { $sum: "$amount" },
+            },
+          },
+        ]),
+        Outcome.aggregate([
+          { $match: { date: dateFilter } },
+          {
+            $group: {
+              _id: dayExpression,
+              amount: { $sum: "$amount" },
+            },
+          },
+        ]),
+      ]);
+      const days = new Map();
+      for (const entry of incomeByDay) {
+        days.set(entry._id, {
+          date: entry._id,
+          income: entry.amount,
+          outcome: 0,
+        });
+      }
+      for (const entry of outcomeByDay) {
+        const day = days.get(entry._id) || {
+          date: entry._id,
+          income: 0,
+          outcome: 0,
+        };
+        day.outcome = entry.amount;
+        days.set(entry._id, day);
+      }
+      report.daily = [...days.values()]
+        .map((day) => ({ ...day, net: day.income - day.outcome }))
+        .sort((left, right) => left.date.localeCompare(right.date));
+    }
+    if (type === "all" || type === "jobs")
+      report.jobs = await JobMonitoring.find().sort({ job_name: 1 }).lean();
     if (!Object.keys(report).length)
       return res.status(400).json({ error: "Unknown report type." });
     res.json(report);
@@ -160,6 +282,22 @@ router.get(
   "/jobs",
   asyncRoute(async (req, res) => {
     res.json(await JobMonitoring.find().sort({ job_name: 1 }).lean());
+  }),
+);
+
+router.patch(
+  "/jobs/:name/priority",
+  asyncRoute(async (req, res) => {
+    const priority = String(req.body.priority || "").toLowerCase();
+    if (!["high", "medium", "low"].includes(priority))
+      return res.status(400).json({ error: "Choose high, medium, or low." });
+    const job = await JobMonitoring.findOneAndUpdate(
+      { job_name: req.params.name },
+      { priority },
+      { new: true },
+    );
+    if (!job) return res.status(404).json({ error: "Background job not found." });
+    res.json(job);
   }),
 );
 

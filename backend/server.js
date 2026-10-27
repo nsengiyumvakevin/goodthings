@@ -6,6 +6,9 @@ const app = require("./src/app");
 const { Admin, JobMonitoring } = require("./models");
 const { seedProducts } = require("./src/database/seed");
 const { startBillExpiryJob } = require("./src/services/bill-expiry.service");
+const {
+  startPaymentReconciliationJob,
+} = require("./src/services/payment-reconciliation.service");
 
 async function start() {
   if (process.env.NODE_ENV === "production" && !process.env.JWT_SECRET) {
@@ -39,6 +42,7 @@ async function start() {
     {
       $setOnInsert: {
         status: "waiting",
+        priority: "medium",
         error: "Waiting for provider callbacks.",
       },
     },
@@ -49,12 +53,25 @@ async function start() {
     {
       $setOnInsert: {
         status: "waiting",
+        priority: "medium",
         error: "Bill expiry worker is starting.",
       },
     },
     { upsert: true },
   );
+  await JobMonitoring.updateOne(
+    { job_name: "payment_reconciliation" },
+    {
+      $setOnInsert: {
+        status: "waiting",
+        priority: "high",
+        error: "Payment reconciliation worker is starting.",
+      },
+    },
+    { upsert: true },
+  );
   startBillExpiryJob();
+  startPaymentReconciliationJob();
 
   const port = Number(process.env.PORT || 3000);
   return app.listen(port, () =>

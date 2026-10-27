@@ -4,7 +4,7 @@ const authenticate = require("../middleware/authenticate");
 const asyncRoute = require("../utils/asyncRoute");
 const {
   applyPaymentResult,
-  verifyMobileMoneyPayment,
+  reconcileMobileMoneyPayment,
 } = require("../services/payment.service");
 
 const router = express.Router();
@@ -24,12 +24,8 @@ router.post(
       $or: [{ bill_id: reference }, { reference }],
     });
     if (!payment) return res.sendStatus(204);
-    const status = await verifyMobileMoneyPayment(payment.reference);
-    if (["SUCCESSFUL", "SUCCESS", "PAID"].includes(status))
-      await applyPaymentResult(payment, true);
-    else if (["FAILED", "REJECTED", "EXPIRED", "TIMEOUT"].includes(status))
-      await applyPaymentResult(payment, false);
-    else return res.sendStatus(202);
+    const updated = await reconcileMobileMoneyPayment(payment);
+    if (!updated || updated.status === "pending") return res.sendStatus(202);
     res.sendStatus(200);
   }),
 );
