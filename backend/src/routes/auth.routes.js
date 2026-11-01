@@ -60,6 +60,27 @@ async function sendEmailCode(client) {
   return response;
 }
 
+async function sendResetCode(client) {
+  const code = createResetCode();
+  client.reset_code_hash = await bcrypt.hash(code, 10);
+  client.reset_code_expires_at = new Date(Date.now() + RESET_CODE_TTL_MS);
+  client.reset_code_attempts = 0;
+  client.reset_code_used_at = undefined;
+  await client.save();
+  const response = { email: client.email };
+  try {
+    await sendEmail({
+      to: client.email,
+      subject: "Your password reset code",
+      text: `Your Goodthings Market password reset code is ${code}.\n\nIt expires in 10 minutes and can only be used once. If you did not request this, you can ignore this email.`,
+    });
+  } catch (error) {
+    if (process.env.NODE_ENV === "production") throw error;
+    response.development_reset_code = code;
+  }
+  return response;
+}
+
 function createToken(account, role) {
   if (process.env.NODE_ENV === "production" && !process.env.JWT_SECRET) {
     throw Object.assign(
@@ -400,22 +421,9 @@ router.post(
     const client = await Client.findOne({ email });
     if (!client) return res.json(response);
 
-    const code = createResetCode();
-    client.reset_code_hash = await bcrypt.hash(code, 10);
-    client.reset_code_expires_at = new Date(Date.now() + RESET_CODE_TTL_MS);
-    client.reset_code_attempts = 0;
-    client.reset_code_used_at = undefined;
-    await client.save();
-    try {
-      await sendEmail({
-        to: client.email,
-        subject: "Your password reset code",
-        text: `Your Goodthings Market password reset code is ${code}.\n\nIt expires in 10 minutes and can only be used once. If you did not request this, you can ignore this email.`,
-      });
-    } catch (error) {
-      if (process.env.NODE_ENV === "production") throw error;
-      response.development_reset_code = code;
-    }
+    const reset = await sendResetCode(client);
+    if (reset.development_reset_code)
+      response.development_reset_code = reset.development_reset_code;
     res.json(response);
   }),
 );
