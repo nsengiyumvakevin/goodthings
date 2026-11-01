@@ -1,7 +1,9 @@
 const NAME_PATTERN = /^[\p{L}][\p{L}' -]*$/u;
 const EMAIL_PATTERN =
   /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z]{2,})+$/;
-const CONSONANT_PATTERN = /[bcdfghjklmnpqrstvwxyz]/gi;
+const GOOGLE_EMAIL_PATTERN =
+  /^[A-Za-z0-9._%+-]+@(gmail|googlemail)\.com$/i;
+const CONSONANT_PATTERN = /[abcdefghijklmnopqrstuvwxyz]/gi;
 
 function validateName(value, label = "Name") {
   const name = String(value || "").trim();
@@ -25,13 +27,15 @@ function validateEmail(value, { requireCapital = true } = {}) {
     return "Email address cannot contain consecutive dots.";
   const [localPart, domain] = email.split("@");
   if (!localPart || !domain)
-    return "Enter a valid email address, for example Name@example.com.";
+    return "Enter a valid email address, for example Name@gmail.com.";
   if (localPart.length > 64)
     return "The part before @ must be 64 characters or fewer.";
   if (localPart.startsWith(".") || localPart.endsWith("."))
     return "Email address cannot start or end with a dot.";
   if (!EMAIL_PATTERN.test(email))
-    return "Enter a valid email address, for example Name@example.com.";
+    return "Enter a valid email address, for example Name@gmail.com.";
+  if (!GOOGLE_EMAIL_PATTERN.test(email))
+    return "Email address must be a Gmail or Googlemail address.";
   const consonants = (email.match(CONSONANT_PATTERN) || []).length;
   if (consonants <= 3)
     return "Email address must contain more than 3 consonants.";
