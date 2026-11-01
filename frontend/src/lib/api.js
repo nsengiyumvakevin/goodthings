@@ -21,13 +21,19 @@ export async function request(path, options = {}) {
     });
     return response.data;
   } catch (error) {
-    throw new Error(
-      error.response?.data?.error ||
-        error.response?.data?.message ||
+    const data = error.response?.data || {};
+    const failure = new Error(
+      data.error ||
+        data.message ||
         error.message ||
         "Something went wrong. Please try again.",
       { cause: error },
     );
+    failure.code = data.code;
+    failure.email = data.email;
+    failure.requiresEmailVerification = data.requires_email_verification;
+    failure.developmentEmailCode = data.development_email_code;
+    throw failure;
   }
 }
 

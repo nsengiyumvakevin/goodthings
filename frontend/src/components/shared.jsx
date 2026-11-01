@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { money, initials } from "../data/demoData.js";
 import {
+  validateName,
+  validateEmail,
+  validatePassword,
+} from "../lib/validation.js";
+import request from "../lib/api.js";
+import {
   AlertCircle,
   Check,
   CheckCircle2,
@@ -908,6 +914,184 @@ export function MobileMoneyDialog({
   );
 }
 
+function GoogleLogo() {
+  return (
+    <svg aria-hidden="true" height="18" viewBox="0 0 18 18" width="18">
+      <path
+        d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92c1.7-1.57 2.68-3.88 2.68-6.62Z"
+        fill="#4285F4"
+      />
+      <path
+        d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.92-2.26c-.8.54-1.84.86-3.04.86-2.34 0-4.32-1.58-5.03-3.7H.96v2.33A9 9 0 0 0 9 18Z"
+        fill="#34A853"
+      />
+      <path
+        d="M3.97 10.72A5.41 5.41 0 0 1 3.69 9c0-.6.1-1.18.28-1.72V4.95H.96A9 9 0 0 0 0 9c0 1.45.35 2.82.96 4.05l3.01-2.33Z"
+        fill="#FBBC05"
+      />
+      <path
+        d="M9 3.58c1.32 0 2.51.45 3.44 1.35l2.58-2.58A8.65 8.65 0 0 0 9 0 9 9 0 0 0 .96 4.95l3.01 2.33C4.68 5.16 6.66 3.58 9 3.58Z"
+        fill="#EA4335"
+      />
+    </svg>
+  );
+}
+
+function GoogleSignInButton({ onCredential }) {
+  const containerRef = useRef(null);
+  const callbackRef = useRef(onCredential);
+  const [clientId, setClientId] = useState(
+    () => import.meta.env.VITE_GOOGLE_CLIENT_ID || "",
+  );
+  const [status, setStatus] = useState("loading");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    callbackRef.current = onCredential;
+  }, [onCredential]);
+
+  useEffect(() => {
+    if (clientId) return undefined;
+    let cancelled = false;
+    request("/auth/google/config")
+      .then((config) => {
+        if (cancelled) return;
+        if (config?.client_id) {
+          setClientId(config.client_id);
+        } else {
+          setStatus("unconfigured");
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setStatus("unconfigured");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [clientId]);
+
+  useEffect(() => {
+    if (!clientId) return undefined;
+    let cancelled = false;
+
+    function renderButton() {
+      const container = containerRef.current;
+      if (cancelled || !container || !window.google?.accounts?.id) return;
+      container.innerHTML = "";
+      const width = Math.max(220, Math.min(container.clientWidth || 320, 400));
+      window.google.accounts.id.initialize({
+        client_id: clientId,
+        callback: (response) => {
+          setError("");
+          if (response?.credential) callbackRef.current?.(response.credential);
+        },
+        error_callback: () => {
+          setError("Google sign in could not start. Please try again.");
+        },
+      });
+      window.google.accounts.id.renderButton(container, {
+        theme: "outline",
+        size: "large",
+        shape: "rectangular",
+        text: "continue_with",
+        logo_alignment: "left",
+        width,
+      });
+      setStatus("ready");
+    }
+
+    const scriptUrl = "https://accounts.google.com/gsi/client";
+    const script = document.querySelector(`script[src="${scriptUrl}"]`);
+    function handleScriptError() {
+      setError(
+        "The Google sign in script could not be loaded. Check your connection and try again.",
+      );
+      setStatus("error");
+    }
+    if (window.google?.accounts?.id) {
+      renderButton();
+      return () => {
+        cancelled = true;
+      };
+    }
+    if (script) {
+      script.addEventListener("load", renderButton);
+      script.addEventListener("error", handleScriptError);
+      return () => {
+        cancelled = true;
+        script.removeEventListener("load", renderButton);
+        script.removeEventListener("error", handleScriptError);
+      };
+    }
+    const newScript = document.createElement("script");
+    newScript.src = scriptUrl;
+    newScript.async = true;
+    newScript.defer = true;
+    newScript.onload = renderButton;
+    newScript.onerror = handleScriptError;
+    document.head.appendChild(newScript);
+    return () => {
+      cancelled = true;
+      newScript.onload = null;
+      newScript.onerror = null;
+    };
+  }, [clientId]);
+
+  if (clientId)
+    return (
+      <div className="grid gap-1.5">
+        <div
+          className="flex min-h-10 w-full items-center justify-center"
+          ref={containerRef}
+        />
+        {status === "loading" && (
+          <span className="text-center text-[11px] text-stone-500 dark:text-stone-400">
+            Loading Google sign in...
+          </span>
+        )}
+        {error && (
+          <span
+            className="text-center text-[11px] text-rose-700 dark:text-rose-300"
+            role="alert"
+          >
+            {error}
+          </span>
+        )}
+      </div>
+    );
+
+  return (
+    <div className="grid gap-1.5">
+      <button
+        className="inline-flex min-h-10 w-full items-center justify-center gap-2.5 rounded border border-stone-300 bg-white px-4 text-sm font-medium text-stone-700 transition hover:bg-stone-50 disabled:opacity-50 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200 dark:hover:bg-stone-800"
+        type="button"
+        disabled={status === "loading"}
+        onClick={() =>
+          setError(
+            "Google sign in is not configured. Set GOOGLE_CLIENT_ID in backend/.env, restart the API, and add this site's origin as an authorized JavaScript origin in Google Cloud.",
+          )
+        }
+      >
+        <GoogleLogo />
+        Continue with Google
+      </button>
+      {status === "loading" && (
+        <span className="text-center text-[11px] text-stone-500 dark:text-stone-400">
+          Checking Google sign in...
+        </span>
+      )}
+      {error && (
+        <span
+          className="text-center text-[11px] text-rose-700 dark:text-rose-300"
+          role="alert"
+        >
+          {error}
+        </span>
+      )}
+    </div>
+  );
+}
+
 export function AuthForm({
   authMode,
   setAuthMode,
@@ -915,6 +1099,9 @@ export function AuthForm({
   loading,
   onForgot,
   onReset,
+  onVerifyEmail,
+  onResendVerification,
+  onGoogle,
 }) {
   const [forgot, setForgot] = useState(false);
   const [forgotStep, setForgotStep] = useState("email");
@@ -923,6 +1110,37 @@ export function AuthForm({
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [formError, setFormError] = useState("");
+  const [verification, setVerification] = useState(null);
+  const [otp, setOtp] = useState("");
+  const [resendMessage, setResendMessage] = useState("");
+
+  async function handleAuthenticate(event) {
+    event.preventDefault();
+    setFormError("");
+    if (authMode === "register") {
+      const form = new FormData(event.currentTarget);
+      const validationError =
+        validateName(form.get("first_name"), "First name") ||
+        validateName(form.get("last_name"), "Last name") ||
+        validateEmail(form.get("email")) ||
+        validatePassword(form.get("password"));
+      if (validationError) {
+        setFormError(validationError);
+        return;
+      }
+    }
+    const result = await authenticate?.(event);
+    if (result?.requires_email_verification) {
+      setVerification({
+        email: result.email,
+        development_email_code: result.development_email_code,
+      });
+      setOtp("");
+      setResendMessage("");
+      return;
+    }
+    if (result?.error) setFormError(result.error);
+  }
 
   function closeForgot() {
     setForgot(false);
@@ -985,6 +1203,11 @@ export function AuthForm({
         onSubmit={async (event) => {
           event.preventDefault();
           setFormError("");
+          const passwordError = validatePassword(newPassword);
+          if (passwordError) {
+            setFormError(passwordError);
+            return;
+          }
           if (newPassword !== confirmPassword) {
             setFormError("The new passwords do not match.");
             return;
@@ -1068,17 +1291,106 @@ export function AuthForm({
       </form>
     );
   }
+  if (verification)
+    return (
+      <form
+        className="grid gap-4"
+        onSubmit={async (event) => {
+          event.preventDefault();
+          setFormError("");
+          const result = await onVerifyEmail?.(verification.email, otp);
+          if (result?.error) setFormError(result.error);
+        }}
+      >
+        <p className="text-sm leading-6 text-stone-600 dark:text-stone-400">
+          Enter the 6-digit code sent to{" "}
+          <b className="text-stone-800 dark:text-stone-200">
+            {verification.email}
+          </b>
+          . This confirms you can access the mailbox.
+        </p>
+        {verification.development_email_code && (
+          <p className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+            Development verification code:{" "}
+            <b className="font-mono">{verification.development_email_code}</b>
+          </p>
+        )}
+        <label className="grid gap-1.5 text-sm font-medium text-stone-700 dark:text-stone-300">
+          Verification code
+          <input
+            className="min-h-10 rounded border border-stone-300 bg-white px-3 text-sm tracking-[0.35em] text-stone-900 outline-none focus:border-emerald-700 focus:ring-2 focus:ring-emerald-700/20 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-100"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            pattern="[0-9]{6}"
+            maxLength="6"
+            autoFocus
+            required
+            value={otp}
+            onChange={(event) => setOtp(event.target.value.replace(/\D/g, ""))}
+          />
+        </label>
+        {formError && (
+          <p className="text-sm text-rose-700 dark:text-rose-300" role="alert">
+            {formError}
+          </p>
+        )}
+        {resendMessage && (
+          <p className="text-xs text-emerald-800 dark:text-emerald-300" role="status">
+            {resendMessage}
+          </p>
+        )}
+        <button className={buttonPrimary} disabled={loading}>
+          {loading ? <Spinner /> : <ShieldCheck size={16} />} Verify email
+        </button>
+        <div className="flex flex-wrap gap-3">
+          <button
+            type="button"
+            className="text-sm font-medium text-emerald-800 dark:text-emerald-300 underline-offset-2 hover:underline"
+            onClick={async () => {
+              setFormError("");
+              setResendMessage("");
+              const result = await onResendVerification?.(verification.email);
+              if (result?.error) {
+                setFormError(result.error);
+                return;
+              }
+              if (result?.development_email_code) {
+                setVerification((current) => ({
+                  ...current,
+                  development_email_code: result.development_email_code,
+                }));
+              }
+              setResendMessage(result?.message || "A new code has been sent.");
+            }}
+          >
+            Send a new code
+          </button>
+          <button
+            type="button"
+            className="text-sm font-medium text-stone-600 dark:text-stone-400 underline-offset-2 hover:underline"
+            onClick={() => {
+              setVerification(null);
+              setOtp("");
+              setFormError("");
+              setResendMessage("");
+            }}
+          >
+            Use a different account
+          </button>
+        </div>
+      </form>
+    );
   return (
-    <form className="grid gap-4" onSubmit={authenticate}>
+    <form className="grid gap-4" onSubmit={handleAuthenticate}>
       {authMode === "register" && (
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="grid gap-1.5 text-sm font-medium text-stone-700 dark:text-stone-300">
             First name
-            <input className="min-h-10 rounded border border-stone-300 bg-white px-3 text-sm text-stone-900 outline-none focus:border-emerald-700 focus:ring-2 focus:ring-emerald-700/20 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-100" name="first_name" autoComplete="given-name" required />
+            <input className="min-h-10 rounded border border-stone-300 bg-white px-3 text-sm text-stone-900 outline-none focus:border-emerald-700 focus:ring-2 focus:ring-emerald-700/20 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-100" name="first_name" autoComplete="given-name" minLength="4" maxLength="60" required />
           </label>
           <label className="grid gap-1.5 text-sm font-medium text-stone-700 dark:text-stone-300">
             Last name
-            <input className="min-h-10 rounded border border-stone-300 bg-white px-3 text-sm text-stone-900 outline-none focus:border-emerald-700 focus:ring-2 focus:ring-emerald-700/20 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-100" name="last_name" autoComplete="family-name" required />
+            <input className="min-h-10 rounded border border-stone-300 bg-white px-3 text-sm text-stone-900 outline-none focus:border-emerald-700 focus:ring-2 focus:ring-emerald-700/20 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-100" name="last_name" autoComplete="family-name" minLength="4" maxLength="60" required />
           </label>
         </div>
       )}
@@ -1097,7 +1409,22 @@ export function AuthForm({
       {(authMode === "admin" || authMode === "register") && (
         <label className="grid gap-1.5 text-sm font-medium text-stone-700 dark:text-stone-300">
           Email address
-          <input className="min-h-10 rounded border border-stone-300 bg-white px-3 text-sm text-stone-900 outline-none focus:border-emerald-700 focus:ring-2 focus:ring-emerald-700/20 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-100" name="email" type="email" autoComplete="email" required />
+          <input
+            className="min-h-10 rounded border border-stone-300 bg-white px-3 text-sm text-stone-900 outline-none focus:border-emerald-700 focus:ring-2 focus:ring-emerald-700/20 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-100"
+            name="email"
+            type="email"
+            autoComplete="email"
+            autoCapitalize="words"
+            maxLength="254"
+            placeholder="Name@example.com"
+            required
+          />
+          {authMode === "register" && (
+            <small className="font-normal text-stone-500 dark:text-stone-400">
+              Start with a capital letter and use more than 3 consonants, for
+              example Name@example.com.
+            </small>
+          )}
         </label>
       )}
       <label className="grid gap-1.5 text-sm font-medium text-stone-700 dark:text-stone-300">
@@ -1110,13 +1437,44 @@ export function AuthForm({
             authMode === "register" ? "new-password" : "current-password"
           }
           minLength="8"
+          maxLength="128"
           required
         />
+        {authMode === "register" && (
+          <small className="font-normal text-stone-500 dark:text-stone-400">
+            At least 8 characters with uppercase and lowercase letters, a
+            number, and a special character.
+          </small>
+        )}
       </label>
+      {formError && (
+        <p className="text-sm text-rose-700 dark:text-rose-300" role="alert">
+          {formError}
+        </p>
+      )}
       <button className={buttonPrimary} disabled={loading}>
         {loading ? <Spinner /> : <UserRound size={16} />}
         {authMode === "register" ? "Create account" : "Sign in"}
       </button>
+      {authMode !== "admin" && onGoogle && (
+        <>
+          <div className="flex items-center gap-3 text-[11px] font-medium text-stone-400 dark:text-stone-500">
+            <span className="h-px flex-1 bg-stone-200 dark:bg-stone-800" />
+            OR
+            <span className="h-px flex-1 bg-stone-200 dark:bg-stone-800" />
+          </div>
+          <GoogleSignInButton
+            onCredential={async (credential) => {
+              setFormError("");
+              const result = await onGoogle(credential);
+              if (result?.error) setFormError(result.error);
+            }}
+          />
+          <p className="text-center text-[11px] leading-5 text-stone-500 dark:text-stone-400">
+            Google accounts are already email verified. No password is needed.
+          </p>
+        </>
+      )}
       {authMode === "login" && (
         <button
           type="button"

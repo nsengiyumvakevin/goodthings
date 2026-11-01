@@ -19,6 +19,7 @@ import {
   Bell,
   Boxes,
   Check,
+  CircleAlert,
   CircleDollarSign,
   CreditCard,
   Download,
@@ -53,6 +54,11 @@ import {
   normalizeReturn,
 } from "./lib/normalize.js";
 import request from "./lib/api.js";
+import {
+  validateName,
+  validateEmail,
+  validatePassword,
+} from "./lib/validation.js";
 
 function encodeProductImage(file) {
   return new Promise((resolve, reject) => {
@@ -138,7 +144,7 @@ function AppShell() {
   );
   const [showAuth, setShowAuth] = useState(false);
   const [authMode, setAuthMode] = useState("login");
-  const [notice, setNotice] = useState("");
+  const [notice, setNotice] = useState(null);
   const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("All activity");
@@ -168,9 +174,13 @@ function AppShell() {
     localStorage.setItem("transaction-theme", theme);
   }, [theme]);
 
+  function notify(message, type = "success") {
+    setNotice(message ? { message, type } : null);
+  }
+
   useEffect(() => {
     if (!notice) return undefined;
-    const timeout = window.setTimeout(() => setNotice(""), 4000);
+    const timeout = window.setTimeout(() => setNotice(null), 4000);
     return () => window.clearTimeout(timeout);
   }, [notice]);
 
@@ -330,7 +340,7 @@ function AppShell() {
           );
         }
       } catch (error) {
-        setNotice(error.message);
+        notify(error.message, "error");
       }
     };
     load();
@@ -351,7 +361,7 @@ function AppShell() {
       `/admin/reports?start=${start.toISOString()}&end=${end.toISOString()}`,
     )
       .then(setReportData)
-      .catch((error) => setNotice(error.message));
+      .catch((error) => notify(error.message, "error"));
   }, [auth, page, period]);
 
   function changeRole(nextRole) {
@@ -388,9 +398,9 @@ function AppShell() {
               )
             : [...items, cartItem],
         );
-        setNotice(`${product.name} added to your bag`);
+        notify(`${product.name} added to your bag`);
       } catch (error) {
-        setNotice(error.message);
+        notify(error.message, "error");
       }
       return;
     }
@@ -404,7 +414,7 @@ function AppShell() {
           )
         : [...items, { ...product, quantity: 1 }];
     });
-    setNotice(`${product.name} added to your bag`);
+    notify(`${product.name} added to your bag`);
   }
 
   async function updateQuantity(productId, delta) {
@@ -430,7 +440,7 @@ function AppShell() {
           );
         }
       } catch (error) {
-        setNotice(error.message);
+        notify(error.message, "error");
       }
       return;
     }
@@ -461,15 +471,15 @@ function AppShell() {
         if (result.payment)
           setPayments((items) => [normalizePayment(result.payment), ...items]);
         setCart([]);
-        setNotice(result.message || "Your bill has been created.");
+        notify(result.message || "Your bill has been created.");
         navigate(clientRoutes["My purchases"]);
       } else {
-        setNotice("Sign in as a client to place an order.");
+        notify("Sign in as a client to place an order.", "error");
         setAuthMode("login");
         setShowAuth(true);
       }
     } catch (error) {
-      setNotice(error.message);
+      notify(error.message, "error");
     } finally {
       setLoading(false);
     }
@@ -487,10 +497,10 @@ function AppShell() {
       });
       if (result.payment)
         setPayments((items) => [normalizePayment(result.payment), ...items]);
-      setNotice(result.message || "Approve the payment on your phone.");
+      notify(result.message || "Approve the payment on your phone.");
       return result.payment;
     } catch (error) {
-      setNotice(error.message);
+      notify(error.message, "error");
       throw error;
     } finally {
       setLoading(false);
@@ -514,7 +524,7 @@ function AppShell() {
 
   function completeMobileMoneyPayment(payment) {
     setCart([]);
-    setNotice(
+    notify(
       `Payment successful${payment?.bill_id ? ` for ${payment.bill_id}` : ""}.`,
     );
   }
@@ -545,7 +555,7 @@ function AppShell() {
         ...items.filter((item) => item.id !== payment.id),
       ]);
     }
-    setNotice(result.message);
+    notify(result.message);
     return result;
   }
 
@@ -572,10 +582,10 @@ function AppShell() {
       });
       setProducts((items) => [normalizeProduct(created), ...items]);
       setActiveModal("");
-      setNotice(`${created.name} added to the catalogue`);
+      notify(`${created.name} added to the catalogue`);
       event.currentTarget.reset();
     } catch (error) {
-      setNotice(error.message);
+      notify(error.message, "error");
     } finally {
       setLoading(false);
     }
@@ -595,9 +605,9 @@ function AppShell() {
             : item,
         ),
       );
-      setNotice(`Cash payment for ${payment.name} confirmed`);
+      notify(`Cash payment for ${payment.name} confirmed`);
     } catch (error) {
-      setNotice(error.message);
+      notify(error.message, "error");
     } finally {
       setLoading(false);
     }
@@ -608,7 +618,7 @@ function AppShell() {
       setAdminNotifications(await request("/admin/notifications"));
       setActiveModal("notifications");
     } catch (error) {
-      setNotice(error.message);
+      notify(error.message, "error");
     }
   }
 
@@ -624,7 +634,7 @@ function AppShell() {
         ),
       );
     } catch (error) {
-      setNotice(error.message);
+      notify(error.message, "error");
     }
   }
 
@@ -640,15 +650,15 @@ function AppShell() {
           entry.id === item.id ? { ...entry, status } : entry,
         ),
       );
-      setNotice(`Return ${status.toLowerCase()}`);
+      notify(`Return ${status.toLowerCase()}`);
     } catch (error) {
-      setNotice(error.message);
+      notify(error.message, "error");
     }
   }
 
   async function createReturn(cartItemId, quantity, reason) {
     if (!auth?.token) {
-      setNotice("Sign in as a client to request a return.");
+      notify("Sign in as a client to request a return.", "error");
       setAuthMode("login");
       setShowAuth(true);
       return false;
@@ -659,10 +669,10 @@ function AppShell() {
         body: JSON.stringify({ cart_item_id: cartItemId, quantity, reason }),
       });
       setReturns((items) => [normalizeReturn(result), ...items]);
-      setNotice("Your return request was submitted.");
+      notify("Your return request was submitted.");
       return true;
     } catch (error) {
-      setNotice(error.message);
+      notify(error.message, "error");
       return false;
     }
   }
@@ -672,9 +682,9 @@ function AppShell() {
     try {
       if (auth?.token)
         await request(`/admin/debts/${debt.id}/reminder`, { method: "POST" });
-      setNotice(`Payment reminder sent to ${debt.name}`);
+      notify(`Payment reminder sent to ${debt.name}`);
     } catch (error) {
-      setNotice(error.message);
+      notify(error.message, "error");
     } finally {
       setLoading(false);
     }
@@ -699,9 +709,9 @@ function AppShell() {
             }
           : data,
       );
-      setNotice(`${jobName} priority set to ${priority}`);
+      notify(`${jobName} priority set to ${priority}`);
     } catch (error) {
-      setNotice(error.message);
+      notify(error.message, "error");
     }
   }
 
@@ -725,9 +735,9 @@ function AppShell() {
       );
       setActiveModal("");
       setSelectedDebt(null);
-      setNotice("Debt payment recorded");
+      notify("Debt payment recorded");
     } catch (error) {
-      setNotice(error.message);
+      notify(error.message, "error");
     } finally {
       setLoading(false);
     }
@@ -755,9 +765,9 @@ function AppShell() {
             : item,
         ),
       );
-      setNotice(`Debt request ${decision === "accept" ? "accepted" : "rejected"}`);
+      notify(`Debt request ${decision === "accept" ? "accepted" : "rejected"}`);
     } catch (error) {
-      setNotice(error.message);
+      notify(error.message, "error");
     } finally {
       setLoading(false);
     }
@@ -770,12 +780,12 @@ function AppShell() {
         method: "POST",
         body: JSON.stringify({ mobile_money_number: mobileNumber }),
       });
-      setNotice(result.message);
+      notify(result.message);
       if (result.payment)
         setPayments((items) => [normalizePayment(result.payment), ...items]);
       navigate(clientRoutes["My purchases"]);
     } catch (error) {
-      setNotice(error.message);
+      notify(error.message, "error");
     } finally {
       setLoading(false);
     }
@@ -849,12 +859,38 @@ function AppShell() {
     URL.revokeObjectURL(link.href);
   }
 
+  function completeSignIn(result) {
+    const user = {
+      ...result.user,
+      token: result.token,
+      role: result.role || (authMode === "admin" ? "admin" : "client"),
+    };
+    localStorage.setItem("transaction-token", result.token);
+    localStorage.setItem("transaction-user", JSON.stringify(user));
+    setAuth(user);
+    changeRole(user.role);
+    setShowAuth(false);
+    notify(`Welcome${user.first_name ? `, ${user.first_name}` : ""}`);
+    return user;
+  }
+
   async function authenticate(event) {
     event.preventDefault();
     setLoading(true);
     const form = new FormData(event.currentTarget);
     try {
       const register = authMode === "register";
+      if (register) {
+        const validationError =
+          validateName(form.get("first_name"), "First name") ||
+          validateName(form.get("last_name"), "Last name") ||
+          validateEmail(form.get("email")) ||
+          validatePassword(form.get("password"));
+        if (validationError) {
+          notify(validationError, "error");
+          return { error: validationError };
+        }
+      }
       const path =
         authMode === "admin"
           ? "/auth/admin/login"
@@ -879,19 +915,78 @@ function AppShell() {
         method: "POST",
         body: JSON.stringify(payload),
       });
-      const user = {
-        ...result.user,
-        token: result.token,
-        role: result.role || (authMode === "admin" ? "admin" : "client"),
-      };
-      localStorage.setItem("transaction-token", result.token);
-      localStorage.setItem("transaction-user", JSON.stringify(user));
-      setAuth(user);
-      changeRole(user.role);
-      setShowAuth(false);
-      setNotice(`Welcome${user.first_name ? `, ${user.first_name}` : ""}`);
+      if (result.requires_email_verification) {
+        notify(result.message);
+        return result;
+      }
+      completeSignIn(result);
+      return result;
     } catch (error) {
-      setNotice(error.message);
+      notify(error.message, "error");
+      if (error.requiresEmailVerification) {
+        return {
+          requires_email_verification: true,
+          email: error.email,
+          development_email_code: error.developmentEmailCode,
+          error: error.message,
+        };
+      }
+      return { error: error.message };
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function signInWithGoogle(credential) {
+    setLoading(true);
+    try {
+      const result = await request("/auth/google", {
+        method: "POST",
+        body: JSON.stringify({ credential }),
+      });
+      completeSignIn(result);
+      return { ok: true };
+    } catch (error) {
+      notify(error.message, "error");
+      return { error: error.message };
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function verifyEmail(email, code) {
+    setLoading(true);
+    try {
+      const result = await request("/auth/verify-email", {
+        method: "POST",
+        body: JSON.stringify({ email, code }),
+      });
+      completeSignIn(result);
+      return { ok: true };
+    } catch (error) {
+      notify(error.message, "error");
+      return { error: error.message };
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function resendVerification(email) {
+    setLoading(true);
+    try {
+      const result = await request("/auth/resend-verification", {
+        method: "POST",
+        body: JSON.stringify({ email }),
+      });
+      notify(
+        result.development_email_code
+          ? `Development verification code: ${result.development_email_code}`
+          : result.message,
+      );
+      return result;
+    } catch (error) {
+      notify(error.message, "error");
+      return { error: error.message };
     } finally {
       setLoading(false);
     }
@@ -902,7 +997,7 @@ function AppShell() {
     localStorage.removeItem("transaction-user");
     setAuth(null);
     navigate("/");
-    setNotice("You have been signed out");
+    notify("You have been signed out");
   }
 
   const pageTitle = page === "Overview" ? "Good morning" : page;
@@ -923,6 +1018,9 @@ function AppShell() {
         setAuthMode={setAuthMode}
         authenticate={authenticate}
         loading={loading}
+        onVerifyEmail={verifyEmail}
+        onResendVerification={resendVerification}
+        onGoogle={signInWithGoogle}
         onForgot={async (email) => {
           setLoading(true);
           try {
@@ -930,14 +1028,14 @@ function AppShell() {
               method: "POST",
               body: JSON.stringify({ email }),
             });
-            setNotice(
+            notify(
               result.development_reset_code
                 ? `Development reset code: ${result.development_reset_code}`
                 : result.message || "Check your email for a reset code",
             );
             return result;
           } catch (error) {
-            setNotice(error.message);
+            notify(error.message, "error");
             return null;
           } finally {
             setLoading(false);
@@ -950,10 +1048,10 @@ function AppShell() {
               method: "POST",
               body: JSON.stringify({ email, code, password }),
             });
-            setNotice(result.message);
+            notify(result.message);
             return true;
           } catch (error) {
-            setNotice(error.message);
+            notify(error.message, "error");
             return false;
           } finally {
             setLoading(false);
@@ -1059,9 +1157,9 @@ function AppShell() {
         />
         {authDialog}
         {notice && (
-          <button className="fixed right-4 top-4 z-50 flex max-w-[min(440px,calc(100vw-2rem))] items-center gap-2.5 rounded-md bg-emerald-900 px-4 py-3 text-left text-sm text-white shadow-xl" role="status" aria-live="polite" onClick={() => setNotice("")}>
-            <Check size={16} />
-            {notice}
+          <button className={`fixed right-4 top-4 z-50 flex max-w-[min(440px,calc(100vw-2rem))] items-center gap-2.5 rounded-md px-4 py-3 text-left text-sm text-white shadow-xl ${notice.type === "error" ? "bg-red-700" : "bg-emerald-700"}`} role="status" aria-live="polite" onClick={() => setNotice(null)}>
+            {notice.type === "error" ? <CircleAlert size={16} /> : <Check size={16} />}
+            {notice.message}
             <X size={15} />
           </button>
         )}
@@ -1227,13 +1325,14 @@ function AppShell() {
                   const decision = debtData.find((debt) =>
                     ["accepted", "rejected"].includes(debt.review_status),
                   );
-                  setNotice(
+                  notify(
                     decision
                       ? `Your debt request was ${decision.review_status}.`
                       : "No new order updates.",
+                    decision?.review_status === "rejected" ? "error" : "success",
                   );
                 } catch (error) {
-                  setNotice(error.message);
+                  notify(error.message, "error");
                 }
               }}
             >
@@ -1244,9 +1343,9 @@ function AppShell() {
         </header>
 
         {notice && (
-          <button className="fixed right-4 top-19 z-40 flex max-w-[min(440px,calc(100vw-2rem))] items-center gap-2.5 rounded-md bg-emerald-900 px-4 py-3 text-left text-sm text-white shadow-xl" role="status" aria-live="polite" onClick={() => setNotice("")}>
-            <Check size={16} />
-            {notice}
+          <button className={`fixed right-4 top-19 z-40 flex max-w-[min(440px,calc(100vw-2rem))] items-center gap-2.5 rounded-md px-4 py-3 text-left text-sm text-white shadow-xl ${notice.type === "error" ? "bg-red-700" : "bg-emerald-700"}`} role="status" aria-live="polite" onClick={() => setNotice(null)}>
+            {notice.type === "error" ? <CircleAlert size={16} /> : <Check size={16} />}
+            {notice.message}
             <X size={15} />
           </button>
         )}
