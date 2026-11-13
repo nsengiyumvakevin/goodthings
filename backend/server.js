@@ -75,7 +75,7 @@ async function start() {
 
   const port = Number(process.env.PORT || 3000);
   return app.listen(port, () =>
-    console.log(`Transaction API listening on port ${port}`),
+    console.log(`Transaction API listening on port ${port}`)
   );
 }
 

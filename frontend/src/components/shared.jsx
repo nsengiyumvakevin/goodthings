@@ -1414,15 +1414,17 @@ export function AuthForm({
             name="email"
             type="email"
             autoComplete="email"
-            autoCapitalize="words"
+            autoCapitalize="none"
             maxLength="254"
-            placeholder="Name@example.com"
+            placeholder={
+              authMode === "admin" ? "admin@example.com" : "name@gmail.com"
+            }
             required
           />
           {authMode === "register" && (
             <small className="font-normal text-stone-500 dark:text-stone-400">
-              Start with a capital letter and use more than 3 consonants, for
-              example Name@example.com.
+              Start with a lowercase letter, use a Gmail address, and include
+              more than 3 consonants, for example name@gmail.com.
             </small>
           )}
         </label>
@@ -1501,9 +1503,6 @@ export function AuthForm({
             New around here?{" "}
             <button className="font-semibold text-emerald-800 dark:text-emerald-300" type="button" onClick={() => setAuthMode("register")}>
               Create an account
-            </button>
-            <button className="font-semibold text-emerald-800 dark:text-emerald-300" type="button" onClick={() => setAuthMode("admin")}>
-              Admin sign in
             </button>
           </>
         ) : (

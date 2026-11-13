@@ -119,6 +119,16 @@ const routePages = Object.fromEntries(
     page,
   ]),
 );
+const authRoutes = {
+  login: "/login",
+  register: "/register",
+  adminLogin: "/admin/login",
+};
+const authRouteModes = {
+  [authRoutes.login]: "login",
+  [authRoutes.register]: "register",
+  [authRoutes.adminLogin]: "admin",
+};
 const formLayout = "grid gap-4";
 const formLabel =
   "grid gap-1.5 text-sm font-medium text-stone-700 dark:text-stone-300";
@@ -142,8 +152,7 @@ function AppShell() {
   const [authChecking, setAuthChecking] = useState(() =>
     Boolean(localStorage.getItem("transaction-token")),
   );
-  const [showAuth, setShowAuth] = useState(false);
-  const [authMode, setAuthMode] = useState("login");
+  const authMode = authRouteModes[location.pathname] || null;
   const [notice, setNotice] = useState(null);
   const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState("");
@@ -364,6 +373,16 @@ function AppShell() {
       .catch((error) => notify(error.message, "error"));
   }, [auth, page, period]);
 
+  function setAuthMode(mode) {
+    navigate(
+      mode === "admin"
+        ? authRoutes.adminLogin
+        : mode === "register"
+          ? authRoutes.register
+          : authRoutes.login,
+    );
+  }
+
   function changeRole(nextRole) {
     setRole(nextRole);
     navigate(nextRole === "admin" ? adminRoutes.Overview : clientRoutes.Shop);
@@ -476,7 +495,6 @@ function AppShell() {
       } else {
         notify("Sign in as a client to place an order.", "error");
         setAuthMode("login");
-        setShowAuth(true);
       }
     } catch (error) {
       notify(error.message, "error");
@@ -660,7 +678,6 @@ function AppShell() {
     if (!auth?.token) {
       notify("Sign in as a client to request a return.", "error");
       setAuthMode("login");
-      setShowAuth(true);
       return false;
     }
     try {
@@ -869,7 +886,6 @@ function AppShell() {
     localStorage.setItem("transaction-user", JSON.stringify(user));
     setAuth(user);
     changeRole(user.role);
-    setShowAuth(false);
     notify(`Welcome${user.first_name ? `, ${user.first_name}` : ""}`);
     return user;
   }
@@ -896,7 +912,7 @@ function AppShell() {
           ? "/auth/admin/login"
           : register
             ? "/auth/register"
-            : "/auth/login";
+            : "/auth/client/login";
       const payload =
         authMode === "admin"
           ? { email: form.get("email"), password: form.get("password") }
@@ -1002,7 +1018,7 @@ function AppShell() {
 
   const pageTitle = page === "Overview" ? "Good morning" : page;
 
-  const authDialog = showAuth ? (
+  const authDialog = authMode ? (
     <Modal
       title={
         authMode === "admin"
@@ -1011,7 +1027,7 @@ function AppShell() {
             ? "Create your account"
             : "Client sign in"
       }
-      onClose={() => setShowAuth(false)}
+      onClose={() => navigate("/")}
     >
       <AuthForm
         authMode={authMode}
@@ -1133,27 +1149,25 @@ function AppShell() {
   }
 
   if (!auth?.token) {
-    if (location.pathname !== "/") return <Navigate to="/" replace />;
+    if (location.pathname !== "/" && !authMode) {
+      return (
+        <Navigate
+          to={
+            location.pathname.startsWith("/admin")
+              ? authRoutes.adminLogin
+              : authRoutes.login
+          }
+          replace
+        />
+      );
+    }
     return (
       <>
         <LandingPage
           theme={theme}
           onToggleTheme={() => setTheme((value) => value === "dark" ? "light" : "dark")}
-          onClientSignIn={() => {
-            setRole("client");
-            setAuthMode("login");
-            setShowAuth(true);
-          }}
-          onClientRegister={() => {
-            setRole("client");
-            setAuthMode("register");
-            setShowAuth(true);
-          }}
-          onAdminSignIn={() => {
-            setRole("admin");
-            setAuthMode("admin");
-            setShowAuth(true);
-          }}
+          onClientSignIn={() => navigate(authRoutes.login)}
+          onClientRegister={() => navigate(authRoutes.register)}
         />
         {authDialog}
         {notice && (

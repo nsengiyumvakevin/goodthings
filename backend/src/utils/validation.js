@@ -1,4 +1,4 @@
-const NAME_PATTERN = /^[\p{L}][\p{L}' -]*$/u;
+const NAME_PATTERN = /^[\p{L}][\p{L}' ]*$/u;
 const EMAIL_PATTERN =
   /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z]{2,})+$/;
 const GOOGLE_EMAIL_PATTERN =
@@ -12,17 +12,17 @@ function validateName(value, label = "Name") {
   if (name.length > 60)
     return `${label} must be 60 characters or fewer.`;
   if (!NAME_PATTERN.test(name))
-    return `${label} can only contain letters, spaces, apostrophes, and hyphens.`;
+    return `${label} can only contain letters, spaces, and apostrophes (no hyphens or underscores).`;
   return "";
 }
 
-function validateEmail(value, { requireCapital = true } = {}) {
+function validateEmail(value, { requireLowercase = true } = {}) {
   const email = String(value || "").trim();
   if (!email) return "Email address is required.";
   if (email.length > 254)
     return "Email address must be 254 characters or fewer.";
-  if (requireCapital && !/^[A-Z]/.test(email))
-    return "Email address must start with a capital letter.";
+  if (requireLowercase && !/^[a-z]/.test(email))
+    return "Email address must start with a lowercase letter.";
   if (email.includes(".."))
     return "Email address cannot contain consecutive dots.";
   const [localPart, domain] = email.split("@");

@@ -1,7 +1,15 @@
 const assert = require("node:assert/strict");
 const { after, before, test } = require("node:test");
+const jwt = require("jsonwebtoken");
 const app = require("../src/app");
 const models = require("../models");
+
+function signToken(role) {
+  return jwt.sign(
+    { sub: "000000000000000000000000", role },
+    process.env.JWT_SECRET || "local-development-secret-change-me",
+  );
+}
 
 let server;
 let baseUrl;
@@ -35,6 +43,20 @@ test("client routes require a client token", async () => {
 test("admin routes require an admin token", async () => {
   const response = await fetch(`${baseUrl}/api/admin/payments`);
   assert.equal(response.status, 401);
+});
+
+test("client tokens cannot access admin routes", async () => {
+  const response = await fetch(`${baseUrl}/api/admin/payments`, {
+    headers: { Authorization: `Bearer ${signToken("client")}` },
+  });
+  assert.equal(response.status, 403);
+});
+
+test("admin tokens cannot access client routes", async () => {
+  const response = await fetch(`${baseUrl}/api/client/cart`, {
+    headers: { Authorization: `Bearer ${signToken("admin")}` },
+  });
+  assert.equal(response.status, 403);
 });
 
 test("debt payment routes require a client token", async () => {

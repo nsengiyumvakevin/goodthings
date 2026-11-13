@@ -1,24 +1,49 @@
+import { useEffect } from "react";
 import { ArrowDownRight, ArrowRight, ArrowUpRight, Check, Moon, PackageCheck, ShieldCheck, Sparkles, Sun } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { initialProducts, money } from "../../data/demoData.js";
 
-export default function LandingPage({ onClientSignIn, onClientRegister, onAdminSignIn, theme, onToggleTheme }) {
+export default function LandingPage({ onClientSignIn, onClientRegister, theme, onToggleTheme }) {
   const featured = initialProducts.slice(0, 3);
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  function goToSection(event, id) {
+    event.preventDefault();
+    if (location.pathname !== "/") {
+      navigate(`/#${id}`);
+      return;
+    }
+    const target = document.getElementById(id);
+    if (!target) return;
+    target.scrollIntoView({ behavior: "smooth", block: "start" });
+    window.history.replaceState(null, "", `#${id}`);
+  }
+
+  useEffect(() => {
+    if (!location.hash) return;
+    const target = document.getElementById(
+      decodeURIComponent(location.hash.slice(1)),
+    );
+    if (!target) return;
+    requestAnimationFrame(() =>
+      target.scrollIntoView({ behavior: "smooth", block: "start" }),
+    );
+  }, [location.pathname, location.hash]);
 
   return (
     <main className="min-h-screen bg-[#fbfcf8] text-[#1c3028] dark:bg-stone-950 dark:text-stone-100">
       <header className="sticky top-0 z-30 flex min-h-19 items-center justify-between gap-3 border-b border-[#dfe6dc]/80 bg-[#fbfcf8]/95 px-5 backdrop-blur dark:border-stone-800 dark:bg-stone-900/95 md:gap-6 md:px-12 xl:px-22">
-        <Link className="inline-flex items-center gap-2.5 text-lg font-bold leading-none text-[#1c3028] no-underline dark:text-stone-100" to="/#top" aria-label="Goodthings Market home">
+        <Link className="inline-flex items-center gap-2.5 text-lg font-bold leading-none text-[#1c3028] no-underline dark:text-stone-100" to="/#top" aria-label="Goodthings Market home" onClick={(event) => goToSection(event, "top")}>
           <span className="grid size-8.5 place-items-center rounded-lg bg-[#e5edcf] text-[#244f3a]"><Sparkles size={17} /></span>
           <span>good<span className="font-medium text-[#55765e] dark:text-lime-300">things</span><small className="mt-1 block text-[10px] font-bold text-[#53665a] dark:text-stone-400">MARKET & LEDGER</small></span>
         </Link>
         <nav className="hidden items-center gap-8 text-sm text-[#56645a] dark:text-stone-300 md:flex" aria-label="Main navigation">
-          <Link className="hover:text-[#245e46] dark:hover:text-lime-300" to="/#collection">The collection</Link>
-          <Link className="hover:text-[#245e46] dark:hover:text-lime-300" to="/#how-it-works">How it works</Link>
-          <Link className="hover:text-[#245e46] dark:hover:text-lime-300" to="/#for-business">For business</Link>
+          <Link className="hover:text-[#245e46] dark:hover:text-lime-300" to="/#collection" onClick={(event) => goToSection(event, "collection")}>The collection</Link>
+          <Link className="hover:text-[#245e46] dark:hover:text-lime-300" to="/#how-it-works" onClick={(event) => goToSection(event, "how-it-works")}>How it works</Link>
+          <Link className="hover:text-[#245e46] dark:hover:text-lime-300" to="/#for-business" onClick={(event) => goToSection(event, "for-business")}>For business</Link>
         </nav>
         <div className="flex items-center gap-1.5 sm:gap-3">
-          <button className="inline-flex items-center text-[11px] text-[#53665a] hover:text-[#245e46] dark:text-stone-300 dark:hover:text-lime-300 sm:text-sm" onClick={onAdminSignIn}>Admin sign in</button>
           <button className="inline-flex min-h-10 items-center gap-1.5 rounded bg-[#245e46] px-2.5 text-[11px] font-bold text-white hover:bg-[#194832] sm:gap-2 sm:px-3 sm:text-sm" onClick={onClientSignIn}>Client sign in <ArrowRight size={15} /></button>
           <button className="grid size-9 shrink-0 place-items-center rounded text-stone-600 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800" aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} onClick={onToggleTheme}>{theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}</button>
         </div>
@@ -31,7 +56,7 @@ export default function LandingPage({ onClientSignIn, onClientRegister, onAdminS
           <p className="mt-6 max-w-107.5 text-[15px] leading-7 text-[#56655b] dark:text-stone-300">Find useful, well-made favourites for home and table. Shop with care, pay your way, and keep every order in one place.</p>
           <div className="mt-7 flex flex-wrap items-center gap-5">
             <button className="inline-flex min-h-11 items-center justify-center gap-2.5 rounded border border-[#245e46] bg-[#245e46] px-4 text-sm font-bold text-white transition hover:-translate-y-px hover:bg-[#194832]" onClick={onClientRegister}>Create your account <ArrowRight size={16} /></button>
-            <Link className="inline-flex items-center gap-2 text-sm font-bold text-[#526a58] dark:text-stone-300" to="/#collection">Explore the collection <ArrowDownRight size={16} /></Link>
+            <Link className="inline-flex items-center gap-2 text-sm font-bold text-[#526a58] dark:text-stone-300" to="/#collection" onClick={(event) => goToSection(event, "collection")}>Explore the collection <ArrowDownRight size={16} /></Link>
           </div>
           <div className="mt-8 flex items-center gap-3 text-xs text-[#5e6d61] dark:text-stone-400">
             <span className="inline-flex items-center gap-1.5"><ShieldCheck size={15} className="text-[#6a8b6d] dark:text-emerald-400" /> Secure checkout</span>
@@ -78,10 +103,9 @@ export default function LandingPage({ onClientSignIn, onClientRegister, onAdminS
 
       <section className="flex flex-col items-start justify-between gap-6 border-y border-[#dfe8db] bg-[#e9efe4] px-6 py-10 dark:border-stone-800 dark:bg-stone-900 md:flex-row md:items-center md:px-12 xl:px-33" id="for-business">
         <div className="max-w-167.5"><span className="text-[10px] font-bold text-[#617363] dark:text-lime-300">FOR THE PEOPLE BEHIND THE COUNTER</span><h2 className="mt-2 font-serif text-3xl font-medium text-[#23382c] dark:text-stone-100">Run your shop with a clearer view.</h2><p className="mt-3 max-w-140 text-[13px] leading-6 text-[#56655b] dark:text-stone-300">Review payments, follow up on debts, record income and expenses, and keep customer returns moving.</p></div>
-        <button className="inline-flex items-center gap-2.5 rounded bg-[#294f3b] px-4 py-3 text-sm font-bold text-white hover:bg-[#194832]" onClick={onAdminSignIn}>Administrator sign in <ArrowRight size={16} /></button>
       </section>
 
-      <footer className="flex flex-wrap items-center justify-between gap-4 px-6 py-6 text-xs text-[#5c6b60] dark:text-stone-400 md:px-12 xl:px-22"><Link className="inline-flex items-center gap-2 text-base font-bold text-[#1c3028] dark:text-stone-100" to="/#top"><span className="grid size-8 place-items-center rounded-lg bg-[#e5edcf] text-[#244f3a]"><Sparkles size={16} /></span>good<span className="font-medium text-[#55765e] dark:text-lime-300">things</span></Link><span>Considered goods for everyday living.</span><button className="inline-flex items-center gap-2 font-bold text-[#245e46] dark:text-lime-300" onClick={onClientSignIn}>Your account <ArrowRight size={14} /></button></footer>
+      <footer className="flex flex-wrap items-center justify-between gap-4 px-6 py-6 text-xs text-[#5c6b60] dark:text-stone-400 md:px-12 xl:px-22"><Link className="inline-flex items-center gap-2 text-base font-bold text-[#1c3028] dark:text-stone-100" to="/#top" onClick={(event) => goToSection(event, "top")}><span className="grid size-8 place-items-center rounded-lg bg-[#e5edcf] text-[#244f3a]"><Sparkles size={16} /></span>good<span className="font-medium text-[#55765e] dark:text-lime-300">things</span></Link><span>Considered goods for everyday living.</span><button className="inline-flex items-center gap-2 font-bold text-[#245e46] dark:text-lime-300" onClick={onClientSignIn}>Your account <ArrowRight size={14} /></button></footer>
     </main>
   );
 }

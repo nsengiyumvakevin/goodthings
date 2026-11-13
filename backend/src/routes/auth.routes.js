@@ -309,53 +309,53 @@ router.post(
   }),
 );
 
-router.post(
-  "/login",
-  asyncRoute(async (req, res) => {
-    const username = String(req.body.username || req.body.email || "").trim();
-    const email = username.toLowerCase();
-    const nameParts = username.split(/\s+/);
-    const client = await Client.findOne(
-      nameParts.length > 1
-        ? {
-            first_name: new RegExp(`^${escapeRegex(nameParts[0])}$`, "i"),
-            last_name: new RegExp(
-              `^${escapeRegex(nameParts.slice(1).join(" "))}$`,
-              "i",
-            ),
-          }
-        : { email },
-    );
-    if (
-      !client ||
-      !(await bcrypt.compare(
-        String(req.body.password || ""),
-        client.password_hash,
-      ))
-    ) {
-      return res.status(401).json({ error: "Email or password is incorrect." });
-    }
-    if (!client.email_verified) {
-      const verification = await sendEmailCode(client);
-      return res.status(403).json({
-        error:
-          "Verify your email address before signing in. We sent you a new verification code.",
-        code: "EMAIL_NOT_VERIFIED",
-        email: client.email,
-        requires_email_verification: true,
-        ...(verification.development_email_code
-          ? { development_email_code: verification.development_email_code }
-          : {}),
-      });
-    }
-    res.json({
-      token: createToken(client, "client"),
-      user: serializeClient(client),
-      role: "client",
-      email_verified: true,
+const loginClient = asyncRoute(async (req, res) => {
+  const username = String(req.body.username || req.body.email || "").trim();
+  const email = username.toLowerCase();
+  const nameParts = username.split(/\s+/);
+  const client = await Client.findOne(
+    nameParts.length > 1
+      ? {
+          first_name: new RegExp(`^${escapeRegex(nameParts[0])}$`, "i"),
+          last_name: new RegExp(
+            `^${escapeRegex(nameParts.slice(1).join(" "))}$`,
+            "i",
+          ),
+        }
+      : { email },
+  );
+  if (
+    !client ||
+    !(await bcrypt.compare(
+      String(req.body.password || ""),
+      client.password_hash,
+    ))
+  ) {
+    return res.status(401).json({ error: "Email or password is incorrect." });
+  }
+  if (!client.email_verified) {
+    const verification = await sendEmailCode(client);
+    return res.status(403).json({
+      error:
+        "Verify your email address before signing in. We sent you a new verification code.",
+      code: "EMAIL_NOT_VERIFIED",
+      email: client.email,
+      requires_email_verification: true,
+      ...(verification.development_email_code
+        ? { development_email_code: verification.development_email_code }
+        : {}),
     });
-  }),
-);
+  }
+  res.json({
+    token: createToken(client, "client"),
+    user: serializeClient(client),
+    role: "client",
+    email_verified: true,
+  });
+});
+
+router.post("/login", loginClient);
+router.post("/client/login", loginClient);
 
 router.post(
   "/admin/login",
